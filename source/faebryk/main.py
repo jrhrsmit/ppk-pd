@@ -28,12 +28,12 @@ from faebryk.library.traits.component import has_footprint
 # Project library imports
 # from library.library.components import ()
 
-K = 1000
-M = 1000_000
-G = 1000_000_000
+k = 1e3 
+M = 1e6 
+G = 1e9
 
-n = 0.001 * 0.001 * 0.001
-u = 0.001 * 0.001
+n = 1e-9
+u = 1e-6
 
 
 class Project(Component):
