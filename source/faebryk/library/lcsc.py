@@ -23,24 +23,6 @@ from faebryk.library.traits.component import has_descriptive_properties
 
 from faebryk.library.kicad import KicadFootprint
 
-import requests
-
-import sqlite3
-
-def find_partnumber(partnumber: str):
-    con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
-    cur = con.cursor()
-    res = cur.execute("SELECT name FROM sqlite_master WHERE name='spam'")
-    res.fetchone() is None
-    # URL = f"https://jlcpcb.com/parts/componentSearch?searchTxt={partnumber}"
-    # page = requests.get(URL)
-    # soup = BeautifulSoup(page.content, "html.parser")
-    # items = soup.find_all("div", class_="simulation-table-item")
-    # for item in items:
-    #     stock_item = item.find("div", class_ = "stock-item")
-    #     stock = stock_item.text
-    #     if stock > 0:
-
 
 def attach_footprint(component: Component, partno: str, get_model: bool = True):
     # TODO dont hardcode relative paths
