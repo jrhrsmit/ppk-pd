@@ -1,81 +1,78 @@
-# This file is part of the faebryk project
-# SPDX-License-Identifier: MIT
-
-"""
-TODO: Explain file
-"""
-
 import logging
 from pathlib import Path
+from typing import List
+import typer
 
-logger = logging.getLogger("main")
+
+# local imports
+from ppk_pd import PPK_PD
+from library.library.components import Mounting_Hole, Faebryk_Logo
+import library.lcsc
 
 
+# function imports
+from faebryk.exporters.netlist.kicad.netlist_kicad import from_faebryk_t2_netlist
+from faebryk.exporters.netlist.netlist import make_t2_netlist_from_t1
 from faebryk.exporters.netlist.graph import (
     make_graph_from_components,
     make_t1_netlist_from_graph,
 )
 
-# function imports
-from faebryk.exporters.netlist.kicad.netlist_kicad import from_faebryk_t2_netlist
-from faebryk.exporters.netlist.netlist import make_t2_netlist_from_t1
-
-# library imports
 from faebryk.library.core import Component
-from faebryk.library.trait_impl.component import has_symmetric_footprint_pinmap
-from faebryk.library.traits.component import has_footprint
-
-# Project library imports
-# from library.library.components import ()
-
-k = 1e3 
-M = 1e6 
-G = 1e9
-
-n = 1e-9
-u = 1e-6
+from faebryk.exporters.netlist.netlist import Component as NL_Component
 
 
-class Project(Component):
-    def __init__(self) -> None:
-        super().__init__()
-
-        # interfaces
-        class _IFs(Component.InterfacesCls()):
-            pass
-
-        self.IFs = _IFs(self)
-
-        # components
-        class _CMPs(Component.ComponentsCls()):
-            pass
-
-        self.CMPs = _CMPs(self)
-
-        # power
-
-        # function
-
-        # hack footprints
-        for r in self.CMPs.get_all():
-            if not r.has_trait(has_footprint):
-                r.add_trait(has_symmetric_footprint_pinmap())
-
-        self.add_trait(has_symmetric_footprint_pinmap())
+# logging settings
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logging.getLogger(library.lcsc.__name__).setLevel(logging.DEBUG)
 
 
-G = Project()
-CMPs = [G]
+def write_netlist(components: List[Component], path: Path) -> bool:
+    graph = make_graph_from_components(components)
+    t1 = make_t1_netlist_from_graph(graph)
+    t2 = make_t2_netlist_from_t1(t1)
+
+    extra_comps = [
+        NL_Component(
+            name=comp["name"],
+            value=comp["value"],
+            properties=comp["properties"],
+        )
+        for comp in t1
+        if comp["real"]
+    ]
+
+    netlist = from_faebryk_t2_netlist(t2, extra_comps)
+
+    if path.exists():
+        old_netlist = path.read_text()
+        # TODO this does not work!
+        if old_netlist == netlist:
+            return False
+        backup_path = path.with_suffix(path.suffix + ".bak")
+        logger.info(f"Backup old netlist at {backup_path}")
+        backup_path.write_text(old_netlist)
+
+    logger.info("Writing Experiment netlist to {}".format(path.resolve()))
+    path.write_text(netlist, encoding="utf-8")
+
+    return True
 
 
-t1_ = make_t1_netlist_from_graph(make_graph_from_components(CMPs))
-netlist = from_faebryk_t2_netlist(make_t2_netlist_from_t1(t1_))
+def main(nonetlist: bool = False):
+    # paths
+    build_dir = Path("./build")
+    faebryk_build_dir = build_dir.joinpath("faebryk")
+    faebryk_build_dir.mkdir(parents=True, exist_ok=True)
+    kicad_prj_path = Path(__file__).parent.parent.joinpath("source")
+    netlist_path = kicad_prj_path.joinpath("main.net")
 
-Path("./build/faebryk/").mkdir(parents=True, exist_ok=True)
-path = Path("./build/faebryk/faebryk.net")
-logger.info("Writing Experiment netlist to {}".format(path.resolve()))
-path.write_text(netlist, encoding="utf-8")
+    # graph
+    G = PPK_PD()
+    # netlist
+    write_netlist([G], netlist_path)
 
-from faebryk.exporters.netlist.netlist import render_graph
 
-render_graph(t1_)
+if __name__ == "__main__":
+    typer.run(main)
