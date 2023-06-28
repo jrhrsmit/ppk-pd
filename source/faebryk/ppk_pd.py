@@ -132,11 +132,11 @@ class Buck_Converter_TPS54331DR(Component):
 
         class _CMPs(Component.ComponentsCls()):
             ic = TPS54331DR()
-            Ren1 = Resistor(TBD)
-            Ren2 = Resistor(TBD)
+            Ren1 = Resistor(TBD, tolerance=Constant(1))
+            Ren2 = Resistor(TBD, tolerance=Constant(1))
             Css = Capacitor(
                 capacitance=TBD,
-                tolerance=10,
+                tolerance=Constant(10),
                 rated_voltage=Constant(10),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
@@ -199,27 +199,30 @@ class PPK_PD(Component):
             output_current=Constant(0.25),
         )
 
-        print(
-            f"PN of 100nF 16V X7R 10%: {find_capacitor(capacitance=100e-9, tolerance_percent=10)}"
-        )
-        print(
-            f"PN of 10pF 10% : {find_capacitor(capacitance=10e-12, tolerance_percent=10)}"
-        )
-        print(
-            f"PN of 2.4pF 15% : {find_capacitor(capacitance=2.4e-12, tolerance_percent=15)}"
-        )
-        print(f"PN of 470k: {find_resistor(resistance=1200)}")
-        lcsc_1k = find_resistor(resistance=1000)
-        print(f"PN of 1k: {lcsc_1k}")
-        print(f"PN of 470k: {find_resistor(resistance=470e3)}")
-        print(f"PN of 1k 0.1%: {find_resistor(resistance=1e3, tolerance_percent=0.1)}")
-        print(f"PN of LMV321: {find_partnumber('LMV321')}")
+        # print(
+        #     f"PN of 100nF 16V X7R 10%: {find_capacitor(capacitance=100e-9, tolerance_percent=10)}"
+        # )
+        # print(
+        #     f"PN of 10pF 10% : {find_capacitor(capacitance=10e-12, tolerance_percent=10)}"
+        # )
+        # print(
+        #     f"PN of 2.4pF 15% : {find_capacitor(capacitance=2.4e-12, tolerance_percent=15)}"
+        # )
+        # print(f"PN of 470k: {find_resistor(resistance=1200)}")
+        # lcsc_1k = find_resistor(resistance=1000)
+        # print(f"PN of 1k: {lcsc_1k}")
+        # print(f"PN of 470k: {find_resistor(resistance=470e3)}")
+        # print(f"PN of 1k 0.1%: {find_resistor(resistance=1e3, tolerance_percent=0.1)}")
+        # print(f"PN of LMV321: {find_partnumber('LMV321')}")
+
+        pick_part(self)
 
         # hack footprints
         for r in get_all_components(self) + [self]:
             if not r.has_trait(has_footprint):
                 assert type(r) in [
                     Buck_Converter_TPS54331DR,
+                    PPK_PD,
                 ], f"{r}"
             if not r.has_trait(has_footprint_pinmap):
                 r.add_trait(has_symmetric_footprint_pinmap())

@@ -265,6 +265,7 @@ class Capacitor(Component):
         self.set_capacitance(capacitance)
         self.set_rated_voltage(rated_voltage)
         self.set_temperature_coefficient(temperature_coefficient)
+        self.set_tolerance(tolerance)
 
     def _setup_traits(self):
         pass
@@ -325,11 +326,12 @@ class Resistor(Component):
         self._setup_traits()
         return self
 
-    def __init__(self, resistance: Parameter, tolerance: Parameter = 1):
+    def __init__(self, resistance: Parameter, tolerance: Parameter = Constant(1)):
         super().__init__()
 
         self._setup_interfaces()
         self.set_resistance(resistance)
+        self.set_tolerance(tolerance)
 
     def set_tolerance(self, tolerance: Parameter):
         self.tolerance = tolerance
@@ -457,6 +459,9 @@ class TPD6S300ARUKR(Component):
 
 
 class TPS54331DR(Component):
+    def set_partnumber(self, partnumber: Parameter):
+        self.partnumber = partnumber
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -470,6 +475,8 @@ class TPS54331DR(Component):
             PH = Electrical()
 
         self.IFs = _IFs(self)
+
+        self.set_partnumber(Constant("TPS54331DR"))
 
         self.add_trait(
             has_defined_footprint_pinmap(

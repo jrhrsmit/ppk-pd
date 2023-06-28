@@ -7,7 +7,6 @@ from faebryk.library.trait_impl.component import (
     has_defined_footprint_pinmap,
     has_footprint,
 )
-from faebryk.library.library.components import Resistor
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
@@ -41,9 +40,6 @@ def pick_capacitor(cmp: Capacitor):
     tolerance = cmp.tolerance.get_trait(
         is_representable_by_single_value
     ).get_single_representing_value()
-    capacitance = cmp.capacitance.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
     temperature_coefficient = cmp.temperature_coefficient.get_trait(
         is_representable_by_single_value
     ).get_single_representing_value()
@@ -52,7 +48,7 @@ def pick_capacitor(cmp: Capacitor):
     ).get_single_representing_value()
 
     lcsc_pn = find_capacitor(
-        capacitance=capacitance,
+        capacitance=cmp.capacitance,
         tolerance_percent=tolerance,
         temperature_coefficient=temperature_coefficient,
         voltage=rated_voltage,
@@ -78,6 +74,7 @@ def pick_part(component: Component):
         elif isinstance(cmp, Mounting_Hole) or isinstance(cmp, Faebryk_Logo):
             # Mechanical components have their footprint in the component defined
             pass
+
         else:
             if not get_all_components(cmp):
                 raise RuntimeError(f"Non-virtual component without footprint: {cmp}")
