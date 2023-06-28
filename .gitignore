@@ -100,3 +100,8 @@ ENV/
 
 _local
 .local
+
+# JLCPCB part database
+cache.z0*
+cache.zip
+cache.sqlite3
