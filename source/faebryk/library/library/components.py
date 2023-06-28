@@ -255,6 +255,7 @@ class Capacitor(Component):
     def __init__(
         self,
         capacitance: Parameter,
+        tolerance: Parameter,
         rated_voltage: Parameter,
         temperature_coefficient: Parameter,
     ):
@@ -294,6 +295,14 @@ class Capacitor(Component):
 
     def set_rated_voltage(self, rated_voltage: Parameter):
         self.rated_voltage = rated_voltage
+
+    def set_tolerance(self, percentage: Parameter):
+        """
+        Set tolerance in percent
+
+        E.g.: set_tolerance(10) results in ±10%.
+        """
+        self.tolerance = percentage
 
     def set_temperature_coefficient(self, temperature_coefficient: Parameter):
         self.temperature_coefficient = temperature_coefficient
