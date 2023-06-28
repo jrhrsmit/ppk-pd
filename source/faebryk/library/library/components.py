@@ -403,7 +403,7 @@ class TPD6S300ARUKR(Component):
 
     def __init__(self) -> None:
         super().__init__()
-    
+
         class _IFs(Component.InterfacesCls()):
             # Pins names start at 1, so make idx 0 empty
             SBU = [None] + times(2, Electrical)
@@ -451,6 +451,37 @@ class TPD6S300ARUKR(Component):
                     "19": self.IFs.D[2],
                     "20": self.IFs.D[1],
                     "21": self.IFs.power.IFs.lv,
+                }
+            )
+        )
+
+
+class TPS54331DR(Component):
+    def __init__(self) -> None:
+        super().__init__()
+
+        class _IFs(Component.InterfacesCls()):
+            boot = Electrical()
+            Vin = Power()
+            enable = Electrical()
+            slow_start = Electrical()
+            Vsense = Electrical()
+            compensation = Electrical()
+            PH = Electrical()
+
+        self.IFs = _IFs(self)
+
+        self.add_trait(
+            has_defined_footprint_pinmap(
+                {
+                    "1": self.IFs.boot,
+                    "2": self.IFs.Vin.IFs.hv,
+                    "3": self.IFs.enable,
+                    "4": self.IFs.slow_start,
+                    "5": self.IFs.Vsense,
+                    "6": self.IFs.compensation,
+                    "7": self.IFs.Vin.IFs.lv,
+                    "8": self.IFs.PH,
                 }
             )
         )
