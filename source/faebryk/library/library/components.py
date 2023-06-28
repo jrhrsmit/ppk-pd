@@ -308,6 +308,55 @@ class Capacitor(Component):
         self.temperature_coefficient = temperature_coefficient
 
 
+class Resistor(Component):
+    def _setup_traits(self):
+        pass
+
+    def _setup_interfaces(self):
+        class _IFs(Component.InterfacesCls()):
+            unnamed = times(2, Electrical)
+
+        self.IFs = _IFs(self)
+
+        self.add_trait(can_bridge_defined(*self.IFs.unnamed))
+
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls)
+        self._setup_traits()
+        return self
+
+    def __init__(self, resistance: Parameter, tolerance: Parameter = 1):
+        super().__init__()
+
+        self._setup_interfaces()
+        self.set_resistance(resistance)
+
+    def set_tolerance(self, tolerance: Parameter):
+        self.tolerance = tolerance
+
+    def set_resistance(self, resistance: Parameter):
+        self.resistance = resistance
+
+        if type(resistance) is not Constant:
+            # TODO this is a bit ugly
+            # it might be that there was another more abstract valid trait
+            # but this challenges the whole trait overriding mechanism
+            # might have to make a trait stack thats popped or so
+            self.del_trait(has_type_description)
+            return
+
+        class _has_type_description(has_type_description.impl()):
+            @staticmethod
+            def get_type_description():
+                assert isinstance(self.resistance, Constant)
+                resistance: Constant = self.resistance
+                return unit_map(
+                    resistance.value, ["µΩ", "mΩ", "Ω", "KΩ", "MΩ", "GΩ"], start="Ω"
+                )
+
+        self.add_trait(_has_type_description())
+
+
 class Faebryk_Logo(Component):
     def __init__(self) -> None:
         super().__init__()
