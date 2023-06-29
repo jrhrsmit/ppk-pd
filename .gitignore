@@ -7,9 +7,11 @@ __pycache__/
 *.so
 
 # KiCad
-source/kicad/*/*-backups
+**-backups
 source/kicad/*/_autosave-*
 source/kicad/*/*cache
+*.kicad_prl
+fp-info-cache
 
 # Distribution / packaging
 .Python
