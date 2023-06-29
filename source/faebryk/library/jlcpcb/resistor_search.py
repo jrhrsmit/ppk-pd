@@ -115,7 +115,6 @@ def log_result(lcsc_pn: str, cmp: Resistor):
 
 def find_resistor(
     cmp: Resistor,
-    case: str = "0402",
     moq: int = 50,
 ):
     """
@@ -128,6 +127,13 @@ def find_resistor(
         is_representable_by_single_value
     ).get_single_representing_value()
 
+    case_size = Resistor.CaseSize(
+        cmp.case_size.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+    )
+    case_size_str = case_size.name.strip("R")
+
     resistance_query = build_resistor_value_query(cmp.resistance)
     tolerance_query = build_resistor_tolerance_query(cmp.resistance, tolerance)
 
@@ -137,7 +143,7 @@ def find_resistor(
         SELECT lcsc 
         FROM "main"."components" 
         WHERE (category_id LIKE '%46%' or category_id LIKE '%52%')
-        AND package LIKE '%{case}'
+        AND package LIKE '%{case_size_str}'
         AND stock > {moq}
         AND {resistance_query}
         AND {tolerance_query}

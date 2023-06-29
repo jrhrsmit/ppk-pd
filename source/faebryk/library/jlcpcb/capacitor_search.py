@@ -96,7 +96,29 @@ def build_capacitor_value_query(capacitance: Parameter):
         query += ")"
         return query
     else:
+        raise NotImplementedError(
+            f"Can't build query for capacitance value of type {type(capacitance)}"
+        )
+
+
+def build_capacitor_rated_voltage_query(rated_voltage: Parameter):
+    if type(rated_voltage) is not Constant:
         raise NotImplementedError
+
+    # TODO: not all voltages are included here. Should actually be fetched from the DB
+    voltages = [2.5, 4, 6.3, 10, 16, 25, 35, 50, 63, 80, 100, 150]
+    allowed_voltages = [voltage for voltage in voltages if voltage >= rated_voltage]
+    query = "("
+    add_or = False
+    for value in allowed_voltages:
+        if add_or:
+            query += " OR "
+        else:
+            add_or = True
+        value_str = float_to_si(value) + "V"
+        query += f"description LIKE '% {value_str}' OR description LIKE '{value_str}'"
+    query += ")"
+    return query
 
 
 def log_result(lcsc_pn: str, cmp: Capacitor):
@@ -121,7 +143,6 @@ def log_result(lcsc_pn: str, cmp: Capacitor):
 
 def find_capacitor(
     cmp: Capacitor,
-    case: str = "0402",
     moq: int = 50,
 ):
     """
@@ -137,12 +158,19 @@ def find_capacitor(
     rated_voltage = cmp.rated_voltage.get_trait(
         is_representable_by_single_value
     ).get_single_representing_value()
+    case_size = Capacitor.CaseSize(
+        cmp.case_size.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+    )
+    case_size_str = case_size.name.strip("C")
 
     capacitance_query = build_capacitor_value_query(cmp.capacitance)
     tolerance_query = build_capacitor_tolerance_query(cmp.capacitance, tolerance)
     temperature_coefficient_query = build_capacitor_temperature_coefficient_query(
         temperature_coefficient
     )
+    rated_voltage_query = build_capacitor_rated_voltage_query(rated_voltage)
 
     con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
     cur = con.cursor()
@@ -150,11 +178,12 @@ def find_capacitor(
         SELECT lcsc 
         FROM "main"."components" 
         WHERE (category_id LIKE '%27%' OR category_id LIKE '%29%')
-        AND package LIKE '%{case}'
+        AND package LIKE '%{case_size_str}'
         AND stock > {moq}
         AND {temperature_coefficient_query}
         AND {capacitance_query}
         AND {tolerance_query}
+        AND {rated_voltage_query}
         ORDER BY basic DESC, price ASC
         """
     res = cur.execute(query).fetchone()

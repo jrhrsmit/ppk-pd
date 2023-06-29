@@ -20,7 +20,7 @@ from faebryk.library.traits.component import (
     has_type_description,
 )
 from faebryk.library.library.interfaces import Electrical, Power
-from faebryk.library.library.parameters import Constant
+from faebryk.library.library.parameters import Constant, Range
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
@@ -236,6 +236,10 @@ class Fuse(Component):
 
 
 class Capacitor(Component):
+    class CapacitorType(Enum):
+        MLCC = 1
+        Electrolytic = 2
+
     @total_ordering
     class TemperatureCoefficient(IntEnum):
         Y5V = 1
@@ -246,6 +250,21 @@ class Capacitor(Component):
         X7R = 6
         X8R = 7
         C0G = 8
+
+    @total_ordering
+    class CaseSize(IntEnum):
+        C01005 = 1
+        C0402 = 2
+        C0603 = 3
+        C0805 = 4
+        C1008 = 5
+        C1206 = 6
+        C1210 = 7
+        C1806 = 8
+        C1812 = 9
+        C1825 = 10
+        C2010 = 11
+        C2512 = 12
 
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls)
@@ -258,6 +277,7 @@ class Capacitor(Component):
         tolerance: Parameter,
         rated_voltage: Parameter,
         temperature_coefficient: Parameter,
+        case_size: Parameter = Constant(2),
     ):
         super().__init__()
 
@@ -266,6 +286,7 @@ class Capacitor(Component):
         self.set_rated_voltage(rated_voltage)
         self.set_temperature_coefficient(temperature_coefficient)
         self.set_tolerance(tolerance)
+        self.set_case_size(case_size)
 
     def _setup_traits(self):
         pass
@@ -308,8 +329,42 @@ class Capacitor(Component):
     def set_temperature_coefficient(self, temperature_coefficient: Parameter):
         self.temperature_coefficient = temperature_coefficient
 
+    def set_case_size(self, case_size: Parameter):
+        self.case_size = case_size
+
+    def set_auto_case_size(self):
+        if type(self.capacitance) is Constant:
+            capacitance = self.capacitance.value
+        elif type(self.capacitance) is Range:
+            capacitance = self.capacitance.max
+        else:
+            raise NotImplementedError
+
+        if capacitance < 1e-6:
+            self.case_size = self.CaseSize.C0402
+        elif capacitance < 10e-6:
+            self.case_size = self.CaseSize.C0603
+        elif capacitance < 100e-6:
+            self.case_size = self.CaseSize.C0805
+        else:
+            self.case_size = self.CaseSize.C1206
+
 
 class Resistor(Component):
+    class CaseSize(IntEnum):
+        R01005 = 1
+        R0402 = 2
+        R0603 = 3
+        R0805 = 4
+        R1008 = 5
+        R1206 = 6
+        R1210 = 7
+        R1806 = 8
+        R1812 = 9
+        R1825 = 10
+        R2010 = 11
+        R2512 = 12
+
     def _setup_traits(self):
         pass
 
@@ -326,7 +381,12 @@ class Resistor(Component):
         self._setup_traits()
         return self
 
-    def __init__(self, resistance: Parameter, tolerance: Parameter = Constant(1)):
+    def __init__(
+        self,
+        resistance: Parameter,
+        tolerance: Parameter = Constant(1),
+        case_size: Parameter = Constant(2),
+    ):
         super().__init__()
 
         self._setup_interfaces()
@@ -357,6 +417,9 @@ class Resistor(Component):
                 )
 
         self.add_trait(_has_type_description())
+
+    def set_case_size(self, case_size: Parameter):
+        self.case_size = case_size
 
 
 class Faebryk_Logo(Component):

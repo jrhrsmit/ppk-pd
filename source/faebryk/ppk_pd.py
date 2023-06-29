@@ -36,6 +36,8 @@ from library.jlcpcb.resistor_search import find_resistor
 from library.jlcpcb.partnumber_search import find_partnumber
 from library.jlcpcb.part_picker import pick_part
 
+from library.e_series import e_series_ratio, E24, E48, E96
+
 
 class Boost_Converter_TPS61040DBVR(Component):
     pass
@@ -68,7 +70,8 @@ class Buck_Converter_TPS54331DR(Component):
             raise ValueError(
                 f"Maximum value for Css exceeded. Allowed 27nF, upper limit: {Css_max*1e9}nF"
             )
-        self.CMPs.Css.set_capacitance(capacitance=Range(Css_min, Css_max))
+        self.CMPs.C5.set_capacitance(capacitance=Range(Css_min, Css_max))
+        self.CMPs.C5.set_auto_case_size()
 
     def calc_enable_resistors(self, input_voltage: Parameter):
         # Resistor value ranges:
@@ -79,8 +82,8 @@ class Buck_Converter_TPS54331DR(Component):
             Vstart = input_voltage.min * 0.95
             Vstop = input_voltage.min * 0.9
         elif type(input_voltage) is Constant:
-            Vstart = input_voltage * 0.95
-            Vstop = input_voltage * 0.9
+            Vstart = input_voltage.value * 0.95
+            Vstop = input_voltage.value * 0.9
         else:
             raise NotImplementedError(
                 f"Can't calculate component values with input voltage of type {type(input_voltage)}"
@@ -97,10 +100,10 @@ class Buck_Converter_TPS54331DR(Component):
         Ren1_value = (Vstart - Vstop) / 3e-6
         Ren2_value = Ven / ((Vstart - Ven) / Ren1_value + 1e-6)
 
-        self.CMPs.Ren1.set_resistance(
+        self.CMPs.R1.set_resistance(
             Range(Ren1_value * (1 - resistor_range), Ren1_value * (1 + resistor_range))
         )
-        self.CMPs.Ren2.set_resistance(
+        self.CMPs.R2.set_resistance(
             Range(Ren2_value * (1 - resistor_range), Ren2_value * (1 + resistor_range))
         )
 
@@ -111,18 +114,89 @@ class Buck_Converter_TPS54331DR(Component):
             f"Ren2: {Ren2_value}: {Ren2_value * (1 - resistor_range)} {Ren2_value * (1 + resistor_range)}"
         )
 
+    def calc_output_voltage_divider(
+        self, output_voltage: Constant, output_voltage_accuracy: Constant
+    ):
+        # TODO: does not account for resistor tolerance itself
+        output_input_ratio = Range(
+            value_min=(
+                self.reference_voltage
+                / output_voltage.value
+                * (1 - output_voltage_accuracy.value)
+            ),
+            value_max=(
+                self.reference_voltage
+                / output_voltage.value
+                * (1 + output_voltage_accuracy.value)
+            ),
+        )
+        (R5, R6) = e_series_ratio(
+            R1=Range(9.8e3, 10.2e3),
+            output_input_ratio=output_input_ratio,
+            e_values=list(set(E24 + E48)),
+        )
+
+        self.CMPs.R5.set_resistance(R5)
+        self.CMPs.R6.set_resistance(R6)
+
+    def calc_input_capacitors(
+        self,
+        input_voltage: Range,
+        input_ripple_voltage: Constant,
+        output_current: Constant,
+    ):
+        # approximate MLCC bulk capacitor ESR with 10mOhm
+        capacitor_esr = 10e-3
+        resulting_input_ripple = (
+            output_current.value * 0.25 / (10e-6 * self.switching_frequency)
+            + output_current.value * capacitor_esr
+        )
+
+        Cbulk = (output_current.value * 0.25) / (input_ripple_voltage.value - output_current.value * capacitor_esr) / self.switching_frequency
+        # spread capacitance over C1 and C2
+        Cbulk /= 2
+        self.CMPs.C1.set_capacitance(Range(Cbulk, 4*Cbulk))
+        self.CMPs.C2.set_capacitance(Range(Cbulk, 4*Cbulk))
+        self.CMPs.C1.set_auto_case_size()
+        self.CMPs.C2.set_auto_case_size()
+
+
+        # plus 50% safety margin against voltage transients
+        self.CMPs.C1.set_rated_voltage(Constant(input_voltage.max * 1.5))
+        self.CMPs.C2.set_rated_voltage(Constant(input_voltage.max * 1.5))
+
     def calc_component_values(
         self,
-        input_voltage: Parameter,
-        output_voltage: Parameter,
-        output_current: Parameter,
+        input_voltage: Range,
+        output_voltage: Constant,
+        input_ripple_voltage: Constant = Constant(0.25),
+        output_ripple_voltage: Constant = Constant(0.05),
+        output_current: Constant = Constant(0.5),
+        output_voltage_accuracy: Constant = Constant(0.02),
     ):
         self.calc_slowstart_capacitor()
         if type(input_voltage) is Constant or type(input_voltage) is Range:
             self.calc_enable_resistors(input_voltage=input_voltage)
 
-    def __init__(self) -> None:
+        self.calc_output_voltage_divider(output_voltage, output_voltage_accuracy)
+        self.calc_input_capacitors(input_voltage, input_ripple_voltage, output_current)
+
+    def __init__(
+        self,
+        input_voltage: Range,
+        output_voltage: Constant,
+        input_ripple_voltage: Constant = Constant(0.25),
+        output_ripple_voltage: Constant = Constant(0.05),
+        output_current: Constant = Constant(0.5),
+        output_voltage_accuracy: Constant = Constant(0.02),
+    ) -> None:
         super().__init__()
+
+        # Switching frequency is fixed at 570kHz
+        self.switching_frequency = 570e3
+
+        # reference voltage is at 800mV
+        self.reference_voltage = 800e-3
 
         class _IFs(Component.InterfacesCls()):
             input = Power()
@@ -132,16 +206,61 @@ class Buck_Converter_TPS54331DR(Component):
 
         class _CMPs(Component.ComponentsCls()):
             ic = TPS54331DR()
-            Ren1 = Resistor(TBD, tolerance=Constant(1))
-            Ren2 = Resistor(TBD, tolerance=Constant(1))
-            Css = Capacitor(
+            # divider for UVLO mechanism in enable pin
+            R1 = Resistor(TBD, tolerance=Constant(1))
+            R2 = Resistor(TBD, tolerance=Constant(1))
+            # compensation resistor
+            R3 = Resistor(TBD, tolerance=Constant(1))
+            # R4 is omitted, not necessary in most designs
+            # Divider for Vsense
+            R5 = Resistor(TBD, tolerance=Constant(1))
+            R6 = Resistor(TBD, tolerance=Constant(1))
+            # input bulk caps
+            C1 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(20),
+                rated_voltage=Constant(10),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            C2 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(20),
+                rated_voltage=Constant(10),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            # input HF filter cap of 10nF
+            C3 = Capacitor(
+                capacitance=Constant(10e-9),
+                tolerance=Constant(20),
+                rated_voltage=Constant(50),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            # boot capacitor
+            C4 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(10),
+                rated_voltage=Constant(50),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+
+            # slow-start capacitor
+            C5 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(10),
+                rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
 
         self.CMPs = _CMPs(self)
+
+        self.calc_component_values(
+            input_voltage,
+            output_voltage,
+            input_ripple_voltage,
+            output_ripple_voltage,
+            output_current,
+            output_voltage_accuracy,
+        )
 
 
 class USB_C_PD_PSU(Component):
@@ -189,15 +308,46 @@ class PPK_PD(Component):
             # mcu = MCU()
             # power_frontend = Power_Frontend()
             # logic_analyzer_frontend = Logic_Analyzer_Frontend()
-            buck = Buck_Converter_TPS54331DR()
+            buck = Buck_Converter_TPS54331DR(
+                input_voltage=Range(5, 22),
+                output_voltage=Constant(5),
+                output_current=Constant(0.1),
+                output_ripple_voltage=Constant(0.03),
+                input_ripple_voltage=Constant(0.1),
+            )
 
         self.CMPs = _CMPs(self)
 
-        self.CMPs.buck.calc_component_values(
-            input_voltage=Range(5, 20),
-            output_voltage=Constant(5),
-            output_current=Constant(0.25),
-        )
+        # self.CMPs.buck.calc_component_values(
+        #     input_voltage=Range(5, 20),
+        #     output_voltage=Constant(5),
+        #     output_current=Constant(0.25),
+        #     output_ripple_voltage=Constant(0.03),
+        #     input_ripple_voltage=Constant(0.1),
+        # )
+
+        # print(e_series_ratio(Constant(1e3), Constant(0.5)))
+        # print(e_series_ratio(Constant(1e3), Constant(0.99999)))
+        # print(e_series_ratio(Constant(1e3), Constant(0.0001)))
+        # print(e_series_ratio(Constant(9.8e3), Constant(0.1)))
+        # print(e_series_ratio(Constant(1e3), Range(0.4, 0.9)))
+        # print(
+        #     e_series_ratio(
+        #         Range(9.8e3, 10.2e3), Constant(0.8 / 3.3), list(set(E24 + E48 + E96))
+        #     )
+        # )
+        # print(
+        #     e_series_ratio(
+        #         Range(9.8e3, 10.2e3), Constant(0.8 / 5), list(set(E24 + E48 + E96))
+        #     )
+        # )
+        # print(
+        #     e_series_ratio(
+        #         Range(9.8e3, 10.2e3),
+        #         Range(0.8 / 5 * 0.98, 0.8 / 5 * 1.02),
+        #         list(set(E24 + E48)),
+        #     )
+        # )
 
         # print(
         #     f"PN of 100nF 16V X7R 10%: {find_capacitor(capacitance=100e-9, tolerance_percent=10)}"
