@@ -2,48 +2,56 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from si_prefix import SI_PREFIX_UNITS, si_format
 import sqlite3
+from library.library.components import Resistor
+from library.jlcpcb.util import (
+    float_to_si,
+    si_to_float,
+    e_values_in_range,
+    get_value_from_pn,
+)
+from faebryk.library.core import Parameter
+from faebryk.library.library.parameters import Range, Constant
+
+from faebryk.library.traits.parameter import (
+    is_representable_by_single_value,
+)
+import re
 
 
-def resistor_value_to_si(value: float) -> str:
-    value_str = si_format(
-        value,
-        precision=2,
-        format_str="{value}",
-    )
-    prefix_str = si_format(
-        value,
-        precision=2,
-        format_str="{prefix}",
-    )
-    return value_str.rstrip("0").rstrip(".") + prefix_str
+def build_resistor_tolerance_query(resistance: Parameter, max_tolerance_percent: float):
+    if type(resistance) is Constant:
+        resistance = resistance.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+    elif type(resistance) is Range:
+        resistance = resistance.min
+    else:
+        raise NotImplementedError
 
-
-def build_resistor_tolerance_query(value: float, max_tolerance_percent: float):
     tolerances = {
-        "0.01%": 0.0001 * value,
-        "0.02%": 0.0002 * value,
-        "0.05%": 0.0005 * value,
-        "0.1%": 0.001 * value,
-        "0.2%": 0.002 * value,
-        "0.25%": 0.0025 * value,
-        "0.5%": 0.005 * value,
-        "1%": 0.01 * value,
-        "2%": 0.02 * value,
-        "3%": 0.03 * value,
-        "5%": 0.05 * value,
-        "7.5%": 0.075 * value,
-        "10%": 0.10 * value,
-        "15%": 0.15 * value,
-        "20%": 0.20 * value,
-        "30%": 0.30 * value,
+        "0.01%": 0.0001 * resistance,
+        "0.02%": 0.0002 * resistance,
+        "0.05%": 0.0005 * resistance,
+        "0.1%": 0.001 * resistance,
+        "0.2%": 0.002 * resistance,
+        "0.25%": 0.0025 * resistance,
+        "0.5%": 0.005 * resistance,
+        "1%": 0.01 * resistance,
+        "2%": 0.02 * resistance,
+        "3%": 0.03 * resistance,
+        "5%": 0.05 * resistance,
+        "7.5%": 0.075 * resistance,
+        "10%": 0.10 * resistance,
+        "15%": 0.15 * resistance,
+        "20%": 0.20 * resistance,
+        "30%": 0.30 * resistance,
     }
     plusminus = "±"
     query = "("
     add_or = False
     for tolerance_str, tolerance_abs in tolerances.items():
-        if tolerance_abs <= max_tolerance_percent / 100 * value:
+        if tolerance_abs <= max_tolerance_percent / 100 * resistance:
             if add_or:
                 query += " OR "
             else:
@@ -56,9 +64,57 @@ def build_resistor_tolerance_query(value: float, max_tolerance_percent: float):
     return query
 
 
+def build_resistor_value_query(resistance: Parameter):
+    if type(resistance) is Constant:
+        value = resistance.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+        value_str = float_to_si(value) + "Ω"
+        query = (
+            f"(description LIKE '% {value_str}%' OR description LIKE '{value_str}%')"
+        )
+        return query
+    elif type(resistance) is Range:
+        e_values = e_values_in_range(resistance)
+        query = "("
+        add_or = False
+        for value in e_values:
+            if add_or:
+                query += " OR "
+            else:
+                add_or = True
+            value_str = float_to_si(value) + "Ω"
+            query += (
+                f"description LIKE '% {value_str}%' OR description LIKE '{value_str}%'"
+            )
+        query += ")"
+        return query
+    else:
+        raise NotImplementedError
+
+
+def log_result(lcsc_pn: str, cmp: Resistor):
+    tolerance = cmp.tolerance.get_trait(
+        is_representable_by_single_value
+    ).get_single_representing_value()
+
+    if type(cmp.resistance) is Range:
+        resistance_str = (
+            f"{float_to_si(cmp.resistance.min)}Ω - {float_to_si(cmp.resistance.max)}Ω"
+        )
+    else:
+        resistance = cmp.resistance.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+        resistance_str = f"{float_to_si(resistance)}Ω"
+
+    logger.info(
+        f"Picked {lcsc_pn: <8} for component {cmp} (value: {resistance_str}, {tolerance}%)"
+    )
+
+
 def find_resistor(
-    resistance: float,
-    tolerance_percent: float = 1,
+    cmp: Resistor,
     case: str = "0402",
     moq: int = 50,
 ):
@@ -67,8 +123,13 @@ def find_resistor(
 
     TODO: Does not find 'better' tolerance components, only exactly the tolerance specified.
     """
-    resistor_str = resistor_value_to_si(resistance) + "Ω"
-    tolerance_query = build_resistor_tolerance_query(resistance, tolerance_percent)
+
+    tolerance = cmp.tolerance.get_trait(
+        is_representable_by_single_value
+    ).get_single_representing_value()
+
+    resistance_query = build_resistor_value_query(cmp.resistance)
+    tolerance_query = build_resistor_tolerance_query(cmp.resistance, tolerance)
 
     con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
     cur = con.cursor()
@@ -78,11 +139,15 @@ def find_resistor(
         WHERE (category_id LIKE '%46%' or category_id LIKE '%52%')
         AND package LIKE '%{case}'
         AND stock > {moq}
-        AND (description LIKE '% {resistor_str}%' OR description LIKE '{resistor_str}%')
+        AND {resistance_query}
         AND {tolerance_query}
         ORDER BY basic DESC, price ASC
         """
     res = cur.execute(query).fetchone()
     if res is None:
         raise LookupError(f"Could not find resistor for query: {query}")
-    return "C" + str(res[0])
+
+    lcsc_pn = "C" + str(res[0])
+    log_result(lcsc_pn, cmp)
+
+    return lcsc_pn

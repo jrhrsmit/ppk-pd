@@ -476,6 +476,7 @@ class TPS54331DR(Component):
 
         self.IFs = _IFs(self)
 
+        self.add_trait(has_defined_type_description("U"))
         self.set_partnumber(Constant("TPS54331DR"))
 
         self.add_trait(

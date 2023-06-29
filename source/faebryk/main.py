@@ -65,7 +65,7 @@ def main(nonetlist: bool = False):
     build_dir = Path("./build")
     faebryk_build_dir = build_dir.joinpath("faebryk")
     faebryk_build_dir.mkdir(parents=True, exist_ok=True)
-    kicad_prj_path = Path(__file__).parent.parent.joinpath("source")
+    kicad_prj_path = Path(__file__).parent.parent.joinpath("kicad")
     netlist_path = kicad_prj_path.joinpath("main.net")
 
     # graph

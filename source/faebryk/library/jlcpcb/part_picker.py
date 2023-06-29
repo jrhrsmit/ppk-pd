@@ -23,36 +23,32 @@ from library.jlcpcb.capacitor_search import find_capacitor
 from library.jlcpcb.resistor_search import find_resistor
 from library.jlcpcb.partnumber_search import find_partnumber
 
+from library.jlcpcb.util import (
+    float_to_si,
+    si_to_float,
+    e_values_in_range,
+    get_value_from_pn,
+)
+from faebryk.library.library.parameters import Range, Constant
+
 
 def pick_resistor(cmp: Resistor):
-    tolerance = cmp.tolerance.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
-    resistance = cmp.tolerance.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
+    lcsc_pn = find_resistor(cmp)
 
-    lcsc_pn = find_resistor(resistance, tolerance)
+    value = get_value_from_pn(lcsc_pn)
+    value_flt = si_to_float(value.strip("Ω"))
+    cmp.set_resistance(Constant(value_flt))
+
     lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
 
 
 def pick_capacitor(cmp: Capacitor):
-    tolerance = cmp.tolerance.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
-    temperature_coefficient = cmp.temperature_coefficient.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
-    rated_voltage = cmp.rated_voltage.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
+    lcsc_pn = find_capacitor(cmp)
 
-    lcsc_pn = find_capacitor(
-        capacitance=cmp.capacitance,
-        tolerance_percent=tolerance,
-        temperature_coefficient=temperature_coefficient,
-        voltage=rated_voltage,
-    )
+    value = get_value_from_pn(lcsc_pn)
+    value_flt = si_to_float(value.strip("F"))
+    cmp.set_capacitance(Constant(value_flt))
+
     lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
 
 
@@ -63,6 +59,7 @@ def pick_part(component: Component):
                 is_representable_by_single_value
             ).get_single_representing_value()
             lcsc_pn = find_partnumber(partnumber)
+            logger.info(f"Picked {lcsc_pn: <8} for component {cmp}")
             lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
 
         elif isinstance(cmp, Resistor):
