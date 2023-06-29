@@ -43,15 +43,3 @@ def get_value_from_pn(lcsc_pn: str) -> str:
     value = re.search(r'[\.0-9]+["pnµmkMG]?[ΩFH]', res[0][0])
     return value.group()
 
-
-def e_values_in_range(value_range: Range):
-    e_values = set(E24 + E48 + E96 + E192)
-    result = []
-    lower_exp = int(floor(log10(value_range.min)))
-    upper_exp = int(ceil(log10(value_range.max)))
-    for exp in range(lower_exp, upper_exp):
-        for e in e_values:
-            val = e * 10**exp
-            if val >= value_range.min and val <= value_range.max:
-                result.append(val)
-    return result

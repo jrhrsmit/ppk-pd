@@ -386,6 +386,20 @@ E24 = [
 E_ALL = sorted(list(set(E24 + E48 + E96 + E192)))
 
 
+def e_series_in_range(value_range: Range, e_series: list = E_ALL):
+    # append 10 to fix the result when R1 is close to 10
+    e_series += [10]
+    result = []
+    lower_exp = int(floor(log10(value_range.min)))
+    upper_exp = int(ceil(log10(value_range.max)))
+    for exp in range(lower_exp, upper_exp):
+        for e in e_series:
+            val = e * 10**exp
+            if val >= value_range.min and val <= value_range.max:
+                result.append(val)
+    return result
+
+
 def e_series_ratio(
     R1: Parameter, output_input_ratio: Parameter, e_values: list = E_ALL
 ) -> Tuple[float, float]:
@@ -465,7 +479,7 @@ def e_series_ratio(
 
             results = []
             R1_values = []
-            for exponent in range(floor(log10(R1.min)), floor(log10(R1.max)) + 1):
+            for exponent in range(floor(log10(R1.min)), ceil(log10(R1.max))):
                 R1_values += [
                     e * 10**exponent
                     for e in e_values
@@ -499,7 +513,7 @@ def e_series_ratio(
 
             results = []
             R1_values = []
-            for exponent in range(floor(log10(R1.min)), floor(log10(R1.max)) + 1):
+            for exponent in range(floor(log10(R1.min)), ceil(log10(R1.max))):
                 R1_values += [
                     e * 10**exponent
                     for e in e_values

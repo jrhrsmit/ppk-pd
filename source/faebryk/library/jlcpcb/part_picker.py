@@ -26,7 +26,6 @@ from library.jlcpcb.partnumber_search import find_partnumber
 from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
-    e_values_in_range,
     get_value_from_pn,
 )
 from faebryk.library.library.parameters import Range, Constant

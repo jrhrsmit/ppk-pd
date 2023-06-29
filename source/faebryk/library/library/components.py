@@ -341,13 +341,13 @@ class Capacitor(Component):
             raise NotImplementedError
 
         if capacitance < 1e-6:
-            self.case_size = self.CaseSize.C0402
+            self.case_size = Constant(self.CaseSize.C0402)
         elif capacitance < 10e-6:
-            self.case_size = self.CaseSize.C0603
+            self.case_size = Constant(self.CaseSize.C0603)
         elif capacitance < 100e-6:
-            self.case_size = self.CaseSize.C0805
+            self.case_size = Constant(self.CaseSize.C0805)
         else:
-            self.case_size = self.CaseSize.C1206
+            self.case_size = Constant(self.CaseSize.C1206)
 
 
 class Resistor(Component):

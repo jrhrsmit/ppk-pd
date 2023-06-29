@@ -9,7 +9,8 @@ from faebryk.library.library.parameters import Range, Constant
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
-from library.jlcpcb.util import float_to_si, e_values_in_range
+from library.jlcpcb.util import float_to_si
+from library.e_series import e_series_in_range
 
 
 def build_capacitor_temperature_coefficient_query(
@@ -81,7 +82,7 @@ def build_capacitor_value_query(capacitance: Parameter):
         )
         return query
     elif type(capacitance) is Range:
-        e_values = e_values_in_range(capacitance)
+        e_values = e_series_in_range(capacitance)
         query = "("
         add_or = False
         for value in e_values:
@@ -107,7 +108,7 @@ def build_capacitor_rated_voltage_query(rated_voltage: Parameter):
 
     # TODO: not all voltages are included here. Should actually be fetched from the DB
     voltages = [2.5, 4, 6.3, 10, 16, 25, 35, 50, 63, 80, 100, 150]
-    allowed_voltages = [voltage for voltage in voltages if voltage >= rated_voltage]
+    allowed_voltages = [voltage for voltage in voltages if voltage >= rated_voltage.value]
     query = "("
     add_or = False
     for value in allowed_voltages:
@@ -155,9 +156,6 @@ def find_capacitor(
     temperature_coefficient = cmp.temperature_coefficient.get_trait(
         is_representable_by_single_value
     ).get_single_representing_value()
-    rated_voltage = cmp.rated_voltage.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
     case_size = Capacitor.CaseSize(
         cmp.case_size.get_trait(
             is_representable_by_single_value
@@ -170,7 +168,7 @@ def find_capacitor(
     temperature_coefficient_query = build_capacitor_temperature_coefficient_query(
         temperature_coefficient
     )
-    rated_voltage_query = build_capacitor_rated_voltage_query(rated_voltage)
+    rated_voltage_query = build_capacitor_rated_voltage_query(cmp.rated_voltage)
 
     con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
     cur = con.cursor()

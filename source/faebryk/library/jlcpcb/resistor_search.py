@@ -7,9 +7,9 @@ from library.library.components import Resistor
 from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
-    e_values_in_range,
     get_value_from_pn,
 )
+from library.e_series import e_series_in_range
 from faebryk.library.core import Parameter
 from faebryk.library.library.parameters import Range, Constant
 
@@ -75,7 +75,7 @@ def build_resistor_value_query(resistance: Parameter):
         )
         return query
     elif type(resistance) is Range:
-        e_values = e_values_in_range(resistance)
+        e_values = e_series_in_range(resistance)
         query = "("
         add_or = False
         for value in e_values:
