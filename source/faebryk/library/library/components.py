@@ -69,6 +69,9 @@ class MOSFET(Component):
 
 
 class Diode(Component):
+    def set_partnumber(self, partnumber: Parameter):
+        self.partnumber = partnumber
+
     def _setup_interfaces(self):
         # interfaces
         class _IFs(Component.InterfacesCls()):
@@ -80,10 +83,13 @@ class Diode(Component):
     def _setup_traits(self):
         self.add_trait(can_bridge_defined(self.IFs.anode, self.IFs.cathode))
 
-    def __init__(self):
+    def __init__(self, partnumber=None):
         super().__init__()
         self._setup_interfaces()
         self._setup_traits()
+
+        if partnumber is not None:
+            self.set_partnumber(partnumber)
 
 
 class TVS(Diode):
@@ -387,13 +393,14 @@ class Resistor(Component):
         self,
         resistance: Parameter,
         tolerance: Parameter = Constant(1),
-        case_size: Parameter = Constant(2),
+        case_size: Parameter = Constant(CaseSize.R0402),
     ):
         super().__init__()
 
         self._setup_interfaces()
         self.set_resistance(resistance)
         self.set_tolerance(tolerance)
+        self.set_case_size(case_size)
 
     def set_tolerance(self, tolerance: Parameter):
         self.tolerance = tolerance

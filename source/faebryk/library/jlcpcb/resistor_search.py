@@ -174,7 +174,7 @@ def find_resistor(
         AND {tolerance_query}
         ORDER BY basic DESC, price ASC
         """
-    res = cur.execute(query).fetchone()
+    res = cur.execute(query).fetchall()
     if res is None:
         raise LookupError(f"Could not find resistor for query: {query}")
 

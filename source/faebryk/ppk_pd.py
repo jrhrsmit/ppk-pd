@@ -27,6 +27,7 @@ from library.library.components import (
     TPS54331DR,
     Capacitor,
     Resistor,
+    Diode,
 )
 
 from library.lcsc import *
@@ -136,8 +137,10 @@ class Buck_Converter_TPS54331DR(Component):
             e_values=list(set(E24 + E48)),
         )
 
-        self.CMPs.R5.set_resistance(R5)
-        self.CMPs.R6.set_resistance(R6)
+        self.CMPs.R5.set_resistance(Constant(R5))
+        self.CMPs.R6.set_resistance(Constant(R6))
+        print(f"R5: {R5}")
+        print(f"R6: {R6}")
 
     def calc_input_capacitors(
         self,
@@ -213,7 +216,7 @@ class Buck_Converter_TPS54331DR(Component):
             R1 = Resistor(TBD, tolerance=Constant(1))
             R2 = Resistor(TBD, tolerance=Constant(1))
             # compensation resistor
-            R3 = Resistor(TBD, tolerance=Constant(1))
+            # R3 = Resistor(TBD, tolerance=Constant(1))
             # R4 is omitted, not necessary in most designs
             # Divider for Vsense
             R5 = Resistor(TBD, tolerance=Constant(1))
@@ -238,14 +241,13 @@ class Buck_Converter_TPS54331DR(Component):
                 rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
-            # boot capacitor
+            # boot capacitor, always 100nF
             C4 = Capacitor(
-                capacitance=TBD,
+                capacitance=Constant(100e-9),
                 tolerance=Constant(10),
                 rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
-
             # slow-start capacitor
             C5 = Capacitor(
                 capacitance=TBD,
@@ -253,6 +255,10 @@ class Buck_Converter_TPS54331DR(Component):
                 rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
+            # Catch diode
+            D1 = Diode(partnumber=Constant("B340A-13-F"))
+            # Inductor
+            # L1 = Inductor()
 
         self.CMPs = _CMPs(self)
 
