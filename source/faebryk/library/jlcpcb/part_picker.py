@@ -45,7 +45,7 @@ def pick_capacitor(cmp: Capacitor):
     lcsc_pn = find_capacitor(cmp)
 
     value = get_value_from_pn(lcsc_pn)
-    value_flt = si_to_float(value.strip("F"))
+    value_flt = si_to_float(value.strip("F").replace("u", "µ"))
     cmp.set_capacitance(Constant(value_flt))
 
     lcsc.attach_footprint(component=cmp, partno=lcsc_pn)

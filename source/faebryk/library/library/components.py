@@ -254,17 +254,18 @@ class Capacitor(Component):
     @total_ordering
     class CaseSize(IntEnum):
         C01005 = 1
-        C0402 = 2
-        C0603 = 3
-        C0805 = 4
-        C1008 = 5
-        C1206 = 6
-        C1210 = 7
-        C1806 = 8
-        C1812 = 9
-        C1825 = 10
-        C2010 = 11
-        C2512 = 12
+        C0201 = 2
+        C0402 = 3
+        C0603 = 4
+        C0805 = 5
+        C1008 = 6
+        C1206 = 7
+        C1210 = 8
+        C1806 = 9
+        C1812 = 10
+        C1825 = 11
+        C2010 = 12
+        C2512 = 13
 
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls)
@@ -277,7 +278,7 @@ class Capacitor(Component):
         tolerance: Parameter,
         rated_voltage: Parameter,
         temperature_coefficient: Parameter,
-        case_size: Parameter = Constant(2),
+        case_size: Parameter = Range(CaseSize.C0402, CaseSize.C1206),
     ):
         super().__init__()
 
@@ -353,17 +354,18 @@ class Capacitor(Component):
 class Resistor(Component):
     class CaseSize(IntEnum):
         R01005 = 1
-        R0402 = 2
-        R0603 = 3
-        R0805 = 4
-        R1008 = 5
-        R1206 = 6
-        R1210 = 7
-        R1806 = 8
-        R1812 = 9
-        R1825 = 10
-        R2010 = 11
-        R2512 = 12
+        R0201 = 2
+        R0402 = 3
+        R0603 = 4
+        R0805 = 5
+        R1008 = 6
+        R1206 = 7
+        R1210 = 8
+        R1806 = 9
+        R1812 = 10
+        R1825 = 11
+        R2010 = 12
+        R2512 = 13
 
     def _setup_traits(self):
         pass

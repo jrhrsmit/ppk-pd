@@ -1,4 +1,6 @@
 import logging
+from typing import Tuple
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,10 @@ def float_to_si(value: float) -> str:
         precision=2,
         format_str="{prefix}",
     )
-    return value_str.rstrip("0").rstrip(".") + prefix_str
+    si_value = value_str.rstrip("0").rstrip(".") + prefix_str
+    # JLCPCB only uses 'u'
+    si_value = si_value.replace("µ", "u")
+    return si_value
 
 
 def get_value_from_pn(lcsc_pn: str) -> str:
@@ -40,6 +45,29 @@ def get_value_from_pn(lcsc_pn: str) -> str:
     res = cur.execute(query).fetchall()
     if len(res) != 1:
         raise LookupError(f"Could not find exact match for PN {lcsc_pn}")
-    value = re.search(r'[\.0-9]+["pnµmkMG]?[ΩFH]', res[0][0])
+    value = re.search(r'[\.0-9]+["pnuµmkMG]?[ΩFH]', res[0][0])
     return value.group()
 
+
+def sort_by_basic_price(
+    query_results: list[Tuple[int, int, str]], quantity: int = 1
+) -> list[Tuple[int, int, float]]:
+    """
+    Sort query by basic and priceS
+
+    Takes a query result in the form of (PN, basic, price JSON).
+    Converts the price JSON to the price at that quantity as a float, and sorts it by basic, and then price
+    """
+
+    for i, result in enumerate(query_results):
+        price_json = json.loads(result[2])
+        for price_range in price_json:
+            if quantity <= price_range["qTo"] or price_range["qTo"] == "null":
+                result_copy = list(query_results[i])
+                result_copy[0] = int(result_copy[0])
+                result_copy[1] = int(result_copy[1])
+                result_copy[2] = float(price_range["price"])
+                query_results[i] = result_copy
+                break
+
+    return sorted(query_results, key=lambda row: (-row[1], row[2]))

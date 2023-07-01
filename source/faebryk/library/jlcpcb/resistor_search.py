@@ -8,6 +8,7 @@ from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
     get_value_from_pn,
+    sort_by_basic_price,
 )
 from library.e_series import e_series_in_range
 from faebryk.library.core import Parameter
@@ -19,7 +20,14 @@ from faebryk.library.traits.parameter import (
 import re
 
 
-def build_resistor_tolerance_query(resistance: Parameter, max_tolerance_percent: float):
+def build_resistor_tolerance_query(resistance: Parameter, tolerance: Parameter):
+    if type(tolerance) is not Constant:
+        raise NotImplementedError
+
+    max_tolerance_percent = tolerance.get_trait(
+        is_representable_by_single_value
+    ).get_single_representing_value()
+
     if type(resistance) is Constant:
         resistance = resistance.get_trait(
             is_representable_by_single_value
@@ -93,6 +101,32 @@ def build_resistor_value_query(resistance: Parameter):
         raise NotImplementedError
 
 
+def build_resistor_case_size_query(case_size: Parameter):
+    if type(case_size) is Constant:
+        value_min = case_size.get_trait(
+            is_representable_by_single_value
+        ).get_single_representing_value()
+        value_max = value_min
+    elif type(case_size) is Range:
+        value_min = case_size.min
+        value_max = case_size.max
+    else:
+        raise NotImplementedError
+
+    query = "("
+    add_or = False
+    for cs in Resistor.CaseSize:
+        if cs >= value_min and cs <= value_max:
+            if add_or:
+                query += " OR "
+            else:
+                add_or = True
+            query += "package LIKE '%" + cs.name.strip("R") + "'"
+
+    query += ")"
+    return query
+
+
 def log_result(lcsc_pn: str, cmp: Resistor):
     tolerance = cmp.tolerance.get_trait(
         is_representable_by_single_value
@@ -115,6 +149,7 @@ def log_result(lcsc_pn: str, cmp: Resistor):
 
 def find_resistor(
     cmp: Resistor,
+    quantity: int = 1,
     moq: int = 50,
 ):
     """
@@ -123,27 +158,17 @@ def find_resistor(
     TODO: Does not find 'better' tolerance components, only exactly the tolerance specified.
     """
 
-    tolerance = cmp.tolerance.get_trait(
-        is_representable_by_single_value
-    ).get_single_representing_value()
-
-    case_size = Resistor.CaseSize(
-        cmp.case_size.get_trait(
-            is_representable_by_single_value
-        ).get_single_representing_value()
-    )
-    case_size_str = case_size.name.strip("R")
-
+    case_size_query = build_resistor_case_size_query(cmp.case_size)
     resistance_query = build_resistor_value_query(cmp.resistance)
-    tolerance_query = build_resistor_tolerance_query(cmp.resistance, tolerance)
+    tolerance_query = build_resistor_tolerance_query(cmp.resistance, cmp.tolerance)
 
     con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
     cur = con.cursor()
     query = f"""
-        SELECT lcsc 
+        SELECT lcsc, basic, price
         FROM "main"."components" 
         WHERE (category_id LIKE '%46%' or category_id LIKE '%52%')
-        AND package LIKE '%{case_size_str}'
+        AND {case_size_query}
         AND stock > {moq}
         AND {resistance_query}
         AND {tolerance_query}
@@ -153,7 +178,9 @@ def find_resistor(
     if res is None:
         raise LookupError(f"Could not find resistor for query: {query}")
 
-    lcsc_pn = "C" + str(res[0])
+    res = sort_by_basic_price(res, quantity)
+
+    lcsc_pn = "C" + str(res[0][0])
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

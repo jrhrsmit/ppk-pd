@@ -147,19 +147,22 @@ class Buck_Converter_TPS54331DR(Component):
     ):
         # approximate MLCC bulk capacitor ESR with 10mOhm
         capacitor_esr = 10e-3
-        resulting_input_ripple = (
-            output_current.value * 0.25 / (10e-6 * self.switching_frequency)
-            + output_current.value * capacitor_esr
+
+        Cbulk = (
+            (output_current.value * 0.25)
+            / (input_ripple_voltage.value - output_current.value * capacitor_esr)
+            / self.switching_frequency
         )
-
-        Cbulk = (output_current.value * 0.25) / (input_ripple_voltage.value - output_current.value * capacitor_esr) / self.switching_frequency
-        # spread capacitance over C1 and C2
-        Cbulk /= 2
-        self.CMPs.C1.set_capacitance(Range(Cbulk, 4*Cbulk))
-        self.CMPs.C2.set_capacitance(Range(Cbulk, 4*Cbulk))
-        self.CMPs.C1.set_auto_case_size()
-        self.CMPs.C2.set_auto_case_size()
-
+        # spread capacitance over C1 and C2, take a minimum of 2.2uF per cap as we have the footprints there anyway
+        Cbulk = max(Cbulk / 2, 2.2e-6)
+        self.CMPs.C1.set_capacitance(Range(Cbulk, 4 * Cbulk))
+        self.CMPs.C2.set_capacitance(Range(Cbulk, 4 * Cbulk))
+        self.CMPs.C1.set_case_size(
+            Range(Capacitor.CaseSize.C0402, Capacitor.CaseSize.C1206)
+        )
+        self.CMPs.C2.set_case_size(
+            Range(Capacitor.CaseSize.C0402, Capacitor.CaseSize.C1206)
+        )
 
         # plus 50% safety margin against voltage transients
         self.CMPs.C1.set_rated_voltage(Constant(input_voltage.max * 1.5))
