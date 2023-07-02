@@ -41,7 +41,7 @@ from library.jlcpcb.part_picker import pick_part
 from library.e_series import e_series_ratio, E24, E48, E96, e_series_in_range
 from library.jlcpcb.util import float_to_si
 
-from math import sqrt
+from math import sqrt, pi, log10, tan, atan, degrees, radians
 
 
 class Boost_Converter_TPS61040DBVR(Component):
@@ -52,7 +52,9 @@ class Buck_Converter_TPS54331DR(Component):
     """
     Buck converter based on TPS54331.
 
-    See https://datasheet.lcsc.com/lcsc/1808272040_Texas-Instruments-TPS54331DR_C9865.pdf for design details
+    See https://datasheet.lcsc.com/lcsc/1808272040_Texas-Instruments-TPS54331DR_C9865.pdf
+    for design details, especially figure 13 for component names and the step by step design
+    procedure for the calculations.
     """
 
     def calc_slowstart_capacitor(self, Tss: Range = Range(3e-3, 8e-3)):
@@ -175,6 +177,65 @@ class Buck_Converter_TPS54331DR(Component):
         self.CMPs.C1.set_rated_voltage(Constant(input_voltage.max * 1.5))
         self.CMPs.C2.set_rated_voltage(Constant(input_voltage.max * 1.5))
 
+    def calc_output_capacitors(
+        self,
+        input_voltage: Range,
+        output_voltage: Constant,
+        output_current: Constant,
+        output_ripple_voltage: Constant,
+    ):
+        R_out = output_voltage.value / output_current.value
+        # With high switching frequencies such as the 570-kHz frequency of this design, internal circuit
+        # limitations of the TPS54331 limit the practical maximum crossover frequency to about 25 kHz.
+        F_crossover_max = 25e3
+        # minimum output capacitance needed to gain loop stability
+        C_out_min_stable = 1 / (2 * pi * R_out * F_crossover_max)
+        # approximate efficiency
+        efficiency = 0.8
+        # calculate actual ripple voltage
+        duty_cycle = output_voltage.value / (input_voltage.max * efficiency)
+        # estimate capacitor ESR to be 10mOhm for X7R caps
+        R_esr = 10e-3
+        # peak to peak inductor current
+        if type(self.CMPs.L1.inductance) is Constant:
+            L = self.CMPs.L1.inductance.value
+        elif type(self.CMPs.L1.inductance) is Range:
+            L = self.CMPs.L1.inductance.max
+        else:
+            raise NotImplementedError("No way to determine maximum inductance of L1")
+
+        I_L_ripple = (
+            (input_voltage.max - output_voltage.value)
+            * duty_cycle
+            / (self.switching_frequency * L)
+        )
+        # minimum output capacitance needed to satisfy the ripple requirement
+        C_out_min_ripple = (duty_cycle - 0.5) / (
+            (output_ripple_voltage.value / I_L_ripple - R_esr)
+            * 4
+            * self.switching_frequency
+        )
+
+        # minimum output capacitance
+        C_out_min = max(C_out_min_ripple, C_out_min_stable)
+
+        print(f"output capacitance C_out_min: {float_to_si(C_out_min)}F")
+        self.CMPs.C8.set_capacitance(Range(C_out_min / 2, C_out_min))
+        self.CMPs.C9.set_capacitance(Range(C_out_min / 2, C_out_min))
+        self.CMPs.C8.set_case_size(
+            Range(Capacitor.CaseSize.C0402, Capacitor.CaseSize.C1206)
+        )
+        self.CMPs.C9.set_case_size(
+            Range(Capacitor.CaseSize.C0402, Capacitor.CaseSize.C1206)
+        )
+        # 20% margin for output ripple voltage against transients and error margin
+        self.CMPs.C8.set_rated_voltage(
+            (output_voltage.value + output_ripple_voltage.value) * 1.2
+        )
+        self.CMPs.C9.set_rated_voltage(
+            (output_voltage.value + output_ripple_voltage.value) * 1.2
+        )
+
     def calc_inductor_value(
         self, input_voltage: Range, output_voltage: Constant, output_current: Constant
     ):
@@ -190,7 +251,6 @@ class Buck_Converter_TPS54331DR(Component):
                 * self.switching_frequency
             )
         )
-        print(L_min)
 
         # take lowest inductance for the highest I values
         L = L_min
@@ -218,6 +278,57 @@ class Buck_Converter_TPS54331DR(Component):
         self.CMPs.L1.set_rated_current(Constant(I_rms))
         self.CMPs.L1.set_tolerance(Constant(20))
 
+    def calc_compensation_filter(
+        self, output_voltage: Constant, output_current: Constant
+    ):
+        V_ggm = 800
+        gain_dc = V_ggm * self.reference_voltage / output_voltage.value
+        C_o = self.CMPs.C8.capacitance.min * 2 / 
+        print(f"Co: {C_o}")
+        # Capacitance at DC can be a factor 2.3 lower than the actual value
+        C_o = 54e-6
+        R_esr = 1e-3
+        F_co = 25e3
+        R_sense = 1 / 12
+        R_o = output_voltage.value / output_current.value
+
+        phase_loss = degrees(
+            atan(2 * pi * F_co * R_esr * C_o) - atan(2 * pi * F_co * R_o * C_o)
+        )
+        phase_margin = 70
+        phase_boost = (phase_margin - 90) - phase_loss
+
+        k = tan(radians(phase_boost / 2 + 45))
+
+        F_z1 = F_co / k
+        F_p1 = F_co * k
+
+        R_oa = 8e6
+        GM_comp = 12
+
+        # low frequency pole
+        gain = -20 * log10(2 * pi * R_sense * F_co * C_o)
+        R_z = (
+            2
+            * pi
+            * F_co
+            * output_voltage.value
+            * C_o
+            * R_oa
+            / (GM_comp * V_ggm * self.reference_voltage)
+        )
+        C_z = 1 / (2 * pi * F_z1 * R_z)
+        C_p = 1 / (2 * pi * F_p1 * R_z)
+
+        print(f"C_o = {float_to_si(C_o)}F")
+        print(f"Gain = {gain:.2f}dB")
+        print(f"PL = {phase_loss:.2f}deg")
+        print(f"F_z1 = {float_to_si(F_z1)}Hz")
+        print(f"F_p1 = {float_to_si(F_p1)}Hz")
+        print(f"R_z = {float_to_si(R_z)}Ohm")
+        print(f"C_z = {float_to_si(C_z)}F")
+        print(f"C_p = {float_to_si(C_p)}F")
+
     def calc_component_values(
         self,
         input_voltage: Range,
@@ -234,6 +345,10 @@ class Buck_Converter_TPS54331DR(Component):
         self.calc_output_voltage_divider(output_voltage, output_voltage_accuracy)
         self.calc_input_capacitors(input_voltage, input_ripple_voltage, output_current)
         self.calc_inductor_value(input_voltage, output_voltage, output_current)
+        self.calc_output_capacitors(
+            input_voltage, output_voltage, output_current, output_ripple_voltage
+        )
+        self.calc_compensation_filter(output_voltage, output_current)
 
     def __init__(
         self,
@@ -296,11 +411,37 @@ class Buck_Converter_TPS54331DR(Component):
                 rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
-            # slow-start capacitor
+            # slow-start capacitor, abs. max voltage on SS pin is 3V
             C5 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(50),
+                rated_voltage=Constant(5),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            # Compensation capacitors, abs. max voltage on comp pin is 3V
+            C6 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(10),
+                rated_voltage=Constant(5),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            C7 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(10),
+                rated_voltage=Constant(5),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            # output capacitors
+            C8 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(20),
+                rated_voltage=TBD,
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            )
+            C9 = Capacitor(
+                capacitance=TBD,
+                tolerance=Constant(20),
+                rated_voltage=TBD,
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # Catch diode
@@ -371,12 +512,19 @@ class PPK_PD(Component):
             # power_frontend = Power_Frontend()
             # logic_analyzer_frontend = Logic_Analyzer_Frontend()
             buck = Buck_Converter_TPS54331DR(
-                input_voltage=Range(5, 22),
-                output_voltage=Constant(5),
-                output_current=Constant(0.5),
+                input_voltage=Range(7, 28),
+                output_voltage=Constant(3.3),
+                output_current=Constant(3),
                 output_ripple_voltage=Constant(0.03),
-                input_ripple_voltage=Constant(0.1),
+                input_ripple_voltage=Constant(0.3),
             )
+            #buck = Buck_Converter_TPS54331DR(
+            #    input_voltage=Range(5, 22),
+            #    output_voltage=Constant(5),
+            #    output_current=Constant(0.5),
+            #    output_ripple_voltage=Constant(0.03),
+            #    input_ripple_voltage=Constant(0.1),
+            #)
 
         self.CMPs = _CMPs(self)
 
