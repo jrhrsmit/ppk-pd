@@ -535,7 +535,7 @@ def e_series_ratio(
             optimum = min(results, key=lambda x: abs(x[0] - target_ratio))
 
             print(
-                f"target ratio: {target_ratio}, optimum ratio: {optimum[0]}, ratio range: {output_input_ratio.min} - {output_input_ratio.max}"
+                f"target ratio: {target_ratio:.3f}, optimum ratio: {optimum[0]:.3f}, ratio range: {output_input_ratio.min:.3f} - {output_input_ratio.max:.3f}"
             )
             if (
                 optimum[0] > output_input_ratio.max

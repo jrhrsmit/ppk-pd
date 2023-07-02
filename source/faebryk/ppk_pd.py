@@ -41,7 +41,7 @@ from library.jlcpcb.part_picker import pick_part
 from library.e_series import e_series_ratio, E24, E48, E96, e_series_in_range
 from library.jlcpcb.util import float_to_si
 
-from math import sqrt, pi, log10, tan, atan, degrees, radians
+from math import sqrt, pi, log10, tan, atan, degrees, radians, exp
 
 
 class Boost_Converter_TPS61040DBVR(Component):
@@ -115,10 +115,10 @@ class Buck_Converter_TPS54331DR(Component):
         )
 
         print(
-            f"Ren1: {Ren1_value}: {Ren1_value * (1 - resistor_range)} {Ren1_value * (1 + resistor_range)}"
+            f"Ren1: {float_to_si(Ren1_value)}Ohm: {float_to_si(Ren1_value * (1 - resistor_range))}Ohm - {float_to_si(Ren1_value * (1 + resistor_range))}Ohm"
         )
         print(
-            f"Ren2: {Ren2_value}: {Ren2_value * (1 - resistor_range)} {Ren2_value * (1 + resistor_range)}"
+            f"Ren2: {float_to_si(Ren2_value)}Ohm: {float_to_si(Ren2_value * (1 - resistor_range))}Ohm - {float_to_si(Ren2_value * (1 + resistor_range))}Ohm"
         )
 
     def calc_output_voltage_divider(
@@ -219,6 +219,14 @@ class Buck_Converter_TPS54331DR(Component):
         # minimum output capacitance
         C_out_min = max(C_out_min_ripple, C_out_min_stable)
 
+        # multiply by 5, as the capacitance at the DC bias can be 5 times as low as specified
+        # for more info see https://www.analog.com/en/technical-articles/how-to-measure-capacity-versus-bias-voltage-on-mlccs.html
+        # Even though this might be worst case, the cheapest capacitor will likely have a voltage
+        # rating just above the specified minimum voltage rating. If this is not the case, the capacitor
+        # will likely be of a low value so that the voltage rating doesn't matter, and thus increasing the
+        # capacitance will not have any effect on the choice of component.
+        C_out_min *= 5
+
         print(f"output capacitance C_out_min: {float_to_si(C_out_min)}F")
         self.CMPs.C8.set_capacitance(Range(C_out_min / 2, C_out_min))
         self.CMPs.C9.set_capacitance(Range(C_out_min / 2, C_out_min))
@@ -230,10 +238,10 @@ class Buck_Converter_TPS54331DR(Component):
         )
         # 20% margin for output ripple voltage against transients and error margin
         self.CMPs.C8.set_rated_voltage(
-            (output_voltage.value + output_ripple_voltage.value) * 1.2
+            Constant((output_voltage.value + output_ripple_voltage.value) * 1.2)
         )
         self.CMPs.C9.set_rated_voltage(
-            (output_voltage.value + output_ripple_voltage.value) * 1.2
+            Constant((output_voltage.value + output_ripple_voltage.value) * 1.2)
         )
 
     def calc_inductor_value(
@@ -283,10 +291,23 @@ class Buck_Converter_TPS54331DR(Component):
     ):
         V_ggm = 800
         gain_dc = V_ggm * self.reference_voltage / output_voltage.value
-        C_o = self.CMPs.C8.capacitance.min * 2 / 
+        # the datasheet mentions their 2x47uF caps can have a DC capacitance as low as 54uF, so account for that error
+        C_out_actual = (
+            self.CMPs.C8.capacitance.min
+            * 2
+            * min(
+                1,
+                exp(
+                    -(
+                        (output_voltage.value - 0.5)
+                        / (self.CMPs.C8.rated_voltage.value / 2)
+                    )
+                ),
+            )
+        )
+        C_o = C_out_actual
+        # C_o = self.CMPs.C8.capacitance.min * 2 * (54 / (47 * 2))
         print(f"Co: {C_o}")
-        # Capacitance at DC can be a factor 2.3 lower than the actual value
-        C_o = 54e-6
         R_esr = 1e-3
         F_co = 25e3
         R_sense = 1 / 12
@@ -512,68 +533,14 @@ class PPK_PD(Component):
             # power_frontend = Power_Frontend()
             # logic_analyzer_frontend = Logic_Analyzer_Frontend()
             buck = Buck_Converter_TPS54331DR(
-                input_voltage=Range(7, 28),
-                output_voltage=Constant(3.3),
+                input_voltage=Range(5, 22),
+                output_voltage=Constant(4),
                 output_current=Constant(3),
-                output_ripple_voltage=Constant(0.03),
-                input_ripple_voltage=Constant(0.3),
+                output_ripple_voltage=Constant(0.001),
+                input_ripple_voltage=Constant(0.1),
             )
-            #buck = Buck_Converter_TPS54331DR(
-            #    input_voltage=Range(5, 22),
-            #    output_voltage=Constant(5),
-            #    output_current=Constant(0.5),
-            #    output_ripple_voltage=Constant(0.03),
-            #    input_ripple_voltage=Constant(0.1),
-            #)
 
         self.CMPs = _CMPs(self)
-
-        # self.CMPs.buck.calc_component_values(
-        #     input_voltage=Range(5, 20),
-        #     output_voltage=Constant(5),
-        #     output_current=Constant(0.25),
-        #     output_ripple_voltage=Constant(0.03),
-        #     input_ripple_voltage=Constant(0.1),
-        # )
-
-        # print(e_series_ratio(Constant(1e3), Constant(0.5)))
-        # print(e_series_ratio(Constant(1e3), Constant(0.99999)))
-        # print(e_series_ratio(Constant(1e3), Constant(0.0001)))
-        # print(e_series_ratio(Constant(9.8e3), Constant(0.1)))
-        # print(e_series_ratio(Constant(1e3), Range(0.4, 0.9)))
-        # print(
-        #     e_series_ratio(
-        #         Range(9.8e3, 10.2e3), Constant(0.8 / 3.3), list(set(E24 + E48 + E96))
-        #     )
-        # )
-        # print(
-        #     e_series_ratio(
-        #         Range(9.8e3, 10.2e3), Constant(0.8 / 5), list(set(E24 + E48 + E96))
-        #     )
-        # )
-        # print(
-        #     e_series_ratio(
-        #         Range(9.8e3, 10.2e3),
-        #         Range(0.8 / 5 * 0.98, 0.8 / 5 * 1.02),
-        #         list(set(E24 + E48)),
-        #     )
-        # )
-
-        # print(
-        #     f"PN of 100nF 16V X7R 10%: {find_capacitor(capacitance=100e-9, tolerance_percent=10)}"
-        # )
-        # print(
-        #     f"PN of 10pF 10% : {find_capacitor(capacitance=10e-12, tolerance_percent=10)}"
-        # )
-        # print(
-        #     f"PN of 2.4pF 15% : {find_capacitor(capacitance=2.4e-12, tolerance_percent=15)}"
-        # )
-        # print(f"PN of 470k: {find_resistor(resistance=1200)}")
-        # lcsc_1k = find_resistor(resistance=1000)
-        # print(f"PN of 1k: {lcsc_1k}")
-        # print(f"PN of 470k: {find_resistor(resistance=470e3)}")
-        # print(f"PN of 1k 0.1%: {find_resistor(resistance=1e3, tolerance_percent=0.1)}")
-        # print(f"PN of LMV321: {find_partnumber('LMV321')}")
 
         pick_part(self)
 
