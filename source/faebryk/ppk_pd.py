@@ -28,6 +28,7 @@ from library.library.components import (
     Capacitor,
     Resistor,
     Diode,
+    Inductor,
 )
 
 from library.lcsc import *
@@ -37,7 +38,10 @@ from library.jlcpcb.resistor_search import find_resistor
 from library.jlcpcb.partnumber_search import find_partnumber
 from library.jlcpcb.part_picker import pick_part
 
-from library.e_series import e_series_ratio, E24, E48, E96
+from library.e_series import e_series_ratio, E24, E48, E96, e_series_in_range
+from library.jlcpcb.util import float_to_si
+
+from math import sqrt
 
 
 class Boost_Converter_TPS61040DBVR(Component):
@@ -171,6 +175,49 @@ class Buck_Converter_TPS54331DR(Component):
         self.CMPs.C1.set_rated_voltage(Constant(input_voltage.max * 1.5))
         self.CMPs.C2.set_rated_voltage(Constant(input_voltage.max * 1.5))
 
+    def calc_inductor_value(
+        self, input_voltage: Range, output_voltage: Constant, output_current: Constant
+    ):
+        # using low-ESR output caps, K_{ind} can be 0.3.
+        K_ind = 0.3
+        L_min = (
+            output_voltage.value
+            * (input_voltage.max - output_voltage.value)
+            / (
+                input_voltage.max
+                * K_ind
+                * output_current.value
+                * self.switching_frequency
+            )
+        )
+        print(L_min)
+
+        # take lowest inductance for the highest I values
+        L = L_min
+        I_rms = sqrt(
+            output_current.value**2
+            + 1
+            / 12
+            * (
+                output_voltage.value
+                * (input_voltage.max - output_voltage.value)
+                / (input_voltage.max * L * self.switching_frequency * 0.8)
+            )
+            ** 2
+        )
+        I_peak = output_current.value + output_voltage.value * (
+            input_voltage.max - output_voltage.value
+        ) / (1.6 * input_voltage.max * L * self.switching_frequency)
+        print(
+            f"L_min: {float_to_si(L_min)}H, L: {float_to_si(L)}H, I_rms: {float_to_si(I_rms)}A, I_peak: {float_to_si(I_peak)}A"
+        )
+        # I_peak and I_rms are calculated based on L_range max
+        self.CMPs.L1.set_inductance(Range(L_min, L_min * 1.5))
+        # Max DC resistance of 100mOhm
+        self.CMPs.L1.set_dc_resistance(Range(0, 0.5))
+        self.CMPs.L1.set_rated_current(Constant(I_rms))
+        self.CMPs.L1.set_tolerance(Constant(20))
+
     def calc_component_values(
         self,
         input_voltage: Range,
@@ -186,6 +233,7 @@ class Buck_Converter_TPS54331DR(Component):
 
         self.calc_output_voltage_divider(output_voltage, output_voltage_accuracy)
         self.calc_input_capacitors(input_voltage, input_ripple_voltage, output_current)
+        self.calc_inductor_value(input_voltage, output_voltage, output_current)
 
     def __init__(
         self,
@@ -258,7 +306,12 @@ class Buck_Converter_TPS54331DR(Component):
             # Catch diode
             D1 = Diode(partnumber=Constant("B340A-13-F"))
             # Inductor
-            # L1 = Inductor()
+            L1 = Inductor(
+                inductance=TBD,
+                self_resonant_frequency=Range(0, self.switching_frequency * 1.2),
+                rated_current=TBD,
+                tolerance=Constant(20),
+            )
 
         self.CMPs = _CMPs(self)
 
@@ -320,7 +373,7 @@ class PPK_PD(Component):
             buck = Buck_Converter_TPS54331DR(
                 input_voltage=Range(5, 22),
                 output_voltage=Constant(5),
-                output_current=Constant(0.1),
+                output_current=Constant(0.5),
                 output_ripple_voltage=Constant(0.03),
                 input_ripple_voltage=Constant(0.1),
             )

@@ -20,6 +20,7 @@ import library.lcsc as lcsc
 from library.library.components import *
 
 from library.jlcpcb.capacitor_search import find_capacitor
+from library.jlcpcb.inductor_search import find_inductor
 from library.jlcpcb.resistor_search import find_resistor
 from library.jlcpcb.partnumber_search import find_partnumber
 
@@ -51,6 +52,16 @@ def pick_capacitor(cmp: Capacitor):
     lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
 
 
+def pick_inductor(cmp: Inductor):
+    lcsc_pn = find_inductor(cmp)
+
+    value = get_value_from_pn(lcsc_pn)
+    value_flt = si_to_float(value.strip("H").replace("u", "µ"))
+    cmp.set_inductance(Constant(value_flt))
+
+    lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
+
+
 def pick_part(component: Component):
     for cmp in component.CMPs.get_all():
         if hasattr(cmp, "partnumber"):
@@ -63,6 +74,9 @@ def pick_part(component: Component):
 
         elif isinstance(cmp, Resistor):
             pick_resistor(cmp)
+
+        elif isinstance(cmp, Inductor):
+            pick_inductor(cmp)
 
         elif isinstance(cmp, Capacitor):
             pick_capacitor(cmp)

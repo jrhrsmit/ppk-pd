@@ -20,7 +20,7 @@ from faebryk.library.traits.component import (
     has_type_description,
 )
 from faebryk.library.library.interfaces import Electrical, Power
-from faebryk.library.library.parameters import Constant, Range
+from faebryk.library.library.parameters import Constant, Range, TBD
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
@@ -87,6 +87,7 @@ class Diode(Component):
         super().__init__()
         self._setup_interfaces()
         self._setup_traits()
+        self.add_trait(has_defined_type_description("D"))
 
         if partnumber is not None:
             self.set_partnumber(partnumber)
@@ -99,7 +100,6 @@ class TVS(Diode):
     def __init__(self, reverse_working_voltage: Parameter):
         super().__init__()
         self.set_reverse_working_voltage(reverse_working_voltage)
-        self.add_trait(has_defined_type_description("D"))
 
 
 class TVS_Array_Common_Anode(Component):
@@ -355,6 +355,104 @@ class Capacitor(Component):
             self.case_size = Constant(self.CaseSize.C0805)
         else:
             self.case_size = Constant(self.CaseSize.C1206)
+
+
+class Inductor(Component):
+    class CaseSize(IntEnum):
+        R01005 = 1
+        R0201 = 2
+        R0402 = 3
+        R0603 = 4
+        R0805 = 5
+        R1008 = 6
+        R1206 = 7
+        R1210 = 8
+        R1806 = 9
+        R1812 = 10
+        R1825 = 11
+        R2010 = 12
+        R2512 = 13
+
+    class InductorType(Enum):
+        Normal = 1
+        Power = 2
+
+    def _setup_interfaces(self):
+        class _IFs(Component.InterfacesCls()):
+            unnamed = times(2, Electrical)
+
+        self.IFs = _IFs(self)
+
+        self.add_trait(can_bridge_defined(*self.IFs.unnamed))
+
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls)
+        return self
+
+    def __init__(
+        self,
+        inductance: Parameter,
+        self_resonant_frequency: Parameter,
+        rated_current: Parameter,
+        tolerance: Parameter,
+        case_size: Parameter = TBD,
+        dc_resistance: Parameter = TBD,
+        inductor_type: Parameter = Constant(InductorType.Normal),
+    ):
+        super().__init__()
+
+        self._setup_interfaces()
+        self.set_inductance(inductance)
+        self.set_tolerance(tolerance)
+        self.set_self_resonant_frequency(self_resonant_frequency)
+        self.set_rated_current(rated_current)
+        self.set_inductor_type(inductor_type)
+        if dc_resistance is not TBD:
+            self.set_dc_resistance(dc_resistance)
+        if case_size is not TBD:
+            self.set_case_size(case_size)
+
+    def set_inductor_type(self, inductor_type: Parameter):
+        self.inductor_type = inductor_type
+
+    def set_dc_resistance(self, dc_resistance: Parameter):
+        self.dc_resistance = dc_resistance
+
+    def set_rated_current(self, rated_current: Parameter):
+        self.rated_current = rated_current
+
+    def set_self_resonant_frequency(self, self_resonant_frequency: Parameter):
+        self.self_resonant_frequency = self_resonant_frequency
+
+    def set_tolerance(self, tolerance: Parameter):
+        self.tolerance = tolerance
+
+    def set_inductance(self, inductance: Parameter):
+        self.inductance = inductance
+
+        if type(inductance) is not Constant:
+            # TODO this is a bit ugly
+            # it might be that there was another more abstract valid trait
+            # but this challenges the whole trait overriding mechanism
+            # might have to make a trait stack thats popped or so
+            self.del_trait(has_type_description)
+            return
+
+        class _has_type_description(has_type_description.impl()):
+            @staticmethod
+            def get_type_description():
+                assert isinstance(self.inductance, Constant)
+                inductance: Constant = self.inductance
+                return unit_map(
+                    inductance.value,
+                    ["nH", "µH", "mH", "H", "KH", "MH", "GH"],
+                    start="H",
+                )
+
+        self.add_trait(_has_type_description())
+
+    def set_case_size(self, case_size: Parameter):
+        self.case_size = case_size
 
 
 class Resistor(Component):
