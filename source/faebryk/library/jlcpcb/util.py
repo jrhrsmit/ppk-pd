@@ -1,10 +1,12 @@
 import logging
 from typing import Tuple
 import json
+import subprocess
 
 logger = logging.getLogger(__name__)
 
 import sqlite3
+import os
 import re
 from faebryk.library.library.parameters import Range, Constant
 from si_prefix import SI_PREFIX_UNITS, si_format, si_parse
@@ -71,3 +73,20 @@ def sort_by_basic_price(
                 break
 
     return sorted(query_results, key=lambda row: (-row[1], row[2]))
+
+
+def connect_to_db() -> sqlite3.Connection:
+    path = "jlcpcb_part_database/cache.sqlite3"
+    script_path = "./jlcpcb_part_database/fetch.sh"
+    # create the dir if it doesn't exist
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.isfile(path):
+        answer = input(
+            "JLCPCB database not yet downloaded. Download now? (~5.8GB) [Y/n]"
+        )
+        if answer == "" or answer.lower() == "y":
+            rc = subprocess.call(script_path)
+        else:
+            exit(1)
+
+    return sqlite3.connect(path)

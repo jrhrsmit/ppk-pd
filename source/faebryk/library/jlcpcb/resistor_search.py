@@ -9,6 +9,7 @@ from library.jlcpcb.util import (
     si_to_float,
     get_value_from_pn,
     sort_by_basic_price,
+    connect_to_db,
 )
 from library.e_series import e_series_in_range
 from faebryk.library.core import Parameter
@@ -162,7 +163,7 @@ def find_resistor(
     resistance_query = build_resistor_value_query(cmp.resistance)
     tolerance_query = build_resistor_tolerance_query(cmp.resistance, cmp.tolerance)
 
-    con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
+    con = connect_to_db()
     cur = con.cursor()
     query = f"""
         SELECT lcsc, basic, price

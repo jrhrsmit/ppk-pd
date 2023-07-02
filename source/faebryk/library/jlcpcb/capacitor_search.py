@@ -9,7 +9,7 @@ from faebryk.library.library.parameters import Range, Constant
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
-from library.jlcpcb.util import float_to_si, sort_by_basic_price
+from library.jlcpcb.util import float_to_si, sort_by_basic_price, connect_to_db
 from library.e_series import e_series_in_range
 
 
@@ -214,7 +214,7 @@ def find_capacitor(
     )
     rated_voltage_query = build_capacitor_rated_voltage_query(cmp.rated_voltage)
 
-    con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
+    con = connect_to_db()
     cur = con.cursor()
     query = f"""
         SELECT lcsc, basic, price

@@ -9,7 +9,12 @@ from faebryk.library.library.parameters import Range, Constant
 from faebryk.library.traits.parameter import (
     is_representable_by_single_value,
 )
-from library.jlcpcb.util import float_to_si, sort_by_basic_price, si_to_float
+from library.jlcpcb.util import (
+    float_to_si,
+    sort_by_basic_price,
+    si_to_float,
+    connect_to_db,
+)
 from library.e_series import e_series_in_range
 import json
 
@@ -323,7 +328,7 @@ def find_inductor(
     inductance_query = build_inductor_value_query(cmp.inductance)
     tolerance_query = build_inductor_tolerance_query(cmp.inductance, cmp.tolerance)
 
-    con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
+    con = connect_to_db()
     cur = con.cursor()
     query = f"""
         SELECT lcsc, basic, price, extra
