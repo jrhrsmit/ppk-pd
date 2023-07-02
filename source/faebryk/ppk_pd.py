@@ -226,7 +226,7 @@ class Buck_Converter_TPS54331DR(Component):
         # rating just above the specified minimum voltage rating. If this is not the case, the capacitor
         # will likely be of a low value so that the voltage rating doesn't matter, and thus increasing the
         # capacitance will not have any effect on the choice of component.
-        C_out_min *= 5
+        # C_out_min *= 2
 
         print(f"output capacitance C_out_min: {float_to_si(C_out_min)}F")
         self.CMPs.C8.set_capacitance(Range(C_out_min / 2, C_out_min))
@@ -360,6 +360,37 @@ class Buck_Converter_TPS54331DR(Component):
             Range(C_p * (1 - error_range), C_p * (1 + error_range))
         )
 
+    def check_input_output_voltage_range(
+        self, input_voltage: Range, output_voltage: Constant, output_current: Constant
+    ):
+        # catch diode D1 forward voltage
+        V_D = 0.55
+        # output inductor series resistance
+        R_L = 0.3
+        # minimum output current
+        I_o_min = 0
+        #
+        R_ds_on_min = 80e-3
+        R_ds_on_max = 200e-3
+        V_o_min = (
+            0.089 * ((input_voltage.max - I_o_min * R_ds_on_min) + V_D)
+            - (I_o_min * R_L)
+            - V_D
+        )
+        if output_voltage.value < V_o_min:
+            raise ValueError(
+                f"Output voltage of {float_to_si(output_voltage.value)}V is lower than minimum output voltage of {float_to_si(V_o_min)}V"
+            )
+        V_o_max = (
+            0.91 * ((input_voltage.min - output_current.value * R_ds_on_max) + V_D)
+            - (output_current.value * R_L)
+            - V_D
+        )
+        if output_voltage.value > V_o_max:
+            raise ValueError(
+                f"Output voltage of {float_to_si(output_voltage.value)}V is higher than maximum output voltage of {float_to_si(V_o_max)}V"
+            )
+
     def calc_component_values(
         self,
         input_voltage: Range,
@@ -369,6 +400,9 @@ class Buck_Converter_TPS54331DR(Component):
         output_current: Constant = Constant(0.5),
         output_voltage_accuracy: Constant = Constant(0.02),
     ):
+        self.check_input_output_voltage_range(
+            input_voltage, output_voltage, output_current
+        )
         self.calc_slowstart_capacitor()
         if type(input_voltage) is Constant or type(input_voltage) is Range:
             self.calc_enable_resistors(input_voltage=input_voltage)
@@ -439,27 +473,27 @@ class Buck_Converter_TPS54331DR(Component):
             C4 = Capacitor(
                 capacitance=Constant(100e-9),
                 tolerance=Constant(10),
-                rated_voltage=Constant(50),
+                rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # slow-start capacitor, abs. max voltage on SS pin is 3V
             C5 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(5),
+                rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # Compensation capacitors, abs. max voltage on comp pin is 3V
             C6 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(50),
+                rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             C7 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(50),
+                rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # output capacitors
@@ -545,7 +579,7 @@ class PPK_PD(Component):
             buck = Buck_Converter_TPS54331DR(
                 input_voltage=Range(5, 22),
                 output_voltage=Constant(4),
-                output_current=Constant(0.5),
+                output_current=Constant(0.75),
                 output_ripple_voltage=Constant(0.001),
                 input_ripple_voltage=Constant(0.1),
             )
