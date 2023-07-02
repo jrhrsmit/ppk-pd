@@ -228,7 +228,7 @@ def find_capacitor(
         AND {rated_voltage_query}
         """
     res = cur.execute(query).fetchall()
-    if res is None:
+    if not res:
         raise LookupError(f"Could not find capacitor for query: {query}")
 
     res = sort_by_basic_price(res, quantity)

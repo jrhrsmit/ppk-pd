@@ -218,7 +218,7 @@ def inductor_filter(
                 if val == "-" or si_to_float(val) < rated_current.value:
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON RC for C{row[0]}")
+                # logger.warn(f"Could not parse JSON RC for C{row[0]}")
                 del query_result[i]
     elif type(rated_current) is Range:
         for i, row in enumerate(query_result):
@@ -230,7 +230,7 @@ def inductor_filter(
                 if val == "-" or (val < rated_current.min or val > rated_current.max):
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON RC for C{row[0]}")
+                # logger.warn(f"Could not parse JSON RC for C{row[0]}")
                 del query_result[i]
     else:
         raise NotImplementedError
@@ -245,7 +245,7 @@ def inductor_filter(
                 if val == "-" or si_to_float(val) > dc_resistance.value:
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON DCR for C{row[0]}")
+                # logger.warn(f"Could not parse JSON DCR for C{row[0]}")
                 del query_result[i]
     elif type(dc_resistance) is Range:
         for i, row in enumerate(query_result):
@@ -257,7 +257,7 @@ def inductor_filter(
                 if val == "-" or (val < dc_resistance.min or val > dc_resistance.max):
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON DCR for C{row[0]}")
+                # logger.warn(f"Could not parse JSON DCR for C{row[0]}")
                 del query_result[i]
     else:
         raise NotImplementedError
@@ -272,7 +272,7 @@ def inductor_filter(
                 if val == "-" or si_to_float(val) < self_resonant_frequency.value:
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON SRF for C{row[0]}")
+                # logger.warn(f"Could not parse JSON SRF for C{row[0]}")
                 del query_result[i]
     elif type(self_resonant_frequency) is Range:
         for i, row in enumerate(query_result):
@@ -288,7 +288,7 @@ def inductor_filter(
                 ):
                     del query_result[i]
             except:
-                logger.warn(f"Could not parse JSON SRF for C{row[0]}")
+                # logger.warn(f"Could not parse JSON SRF for C{row[0]}")
                 del query_result[i]
     else:
         raise NotImplementedError
@@ -335,7 +335,7 @@ def find_inductor(
         AND {tolerance_query}
         """
     res = cur.execute(query).fetchall()
-    if res is None:
+    if not res:
         raise LookupError(f"Could not find inductor for query: {query}")
 
     res = inductor_filter(
