@@ -387,6 +387,7 @@ class Inductor(Component):
 
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls)
+        self.add_trait(has_symmetric_footprint_pinmap())
         return self
 
     def __init__(

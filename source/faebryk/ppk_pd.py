@@ -200,14 +200,14 @@ class Buck_Converter_TPS54331DR(Component):
         if type(self.CMPs.L1.inductance) is Constant:
             L = self.CMPs.L1.inductance.value
         elif type(self.CMPs.L1.inductance) is Range:
-            L = self.CMPs.L1.inductance.max
+            L = self.CMPs.L1.inductance.min
         else:
             raise NotImplementedError("No way to determine maximum inductance of L1")
 
         I_L_ripple = (
-            (input_voltage.max - output_voltage.value)
-            * duty_cycle
-            / (self.switching_frequency * L)
+            output_voltage.value
+            * (input_voltage.max - output_voltage.value)
+            / (input_voltage.max * L * self.switching_frequency * 0.8)
         )
         # minimum output capacitance needed to satisfy the ripple requirement
         C_out_min_ripple = (duty_cycle - 0.5) / (
@@ -217,6 +217,7 @@ class Buck_Converter_TPS54331DR(Component):
         )
 
         # minimum output capacitance
+        print(f"min rip: {C_out_min_ripple}, stab: {C_out_min_stable}")
         C_out_min = max(C_out_min_ripple, C_out_min_stable)
 
         # multiply by 5, as the capacitance at the DC bias can be 5 times as low as specified
@@ -236,12 +237,12 @@ class Buck_Converter_TPS54331DR(Component):
         self.CMPs.C9.set_case_size(
             Range(Capacitor.CaseSize.C0402, Capacitor.CaseSize.C1206)
         )
-        # 20% margin for output ripple voltage against transients and error margin
+        # 100% margin for output ripple voltage against transients + increase the DC capacitance
         self.CMPs.C8.set_rated_voltage(
-            Constant((output_voltage.value + output_ripple_voltage.value) * 1.2)
+            Constant((output_voltage.value + output_ripple_voltage.value) * 2)
         )
         self.CMPs.C9.set_rated_voltage(
-            Constant((output_voltage.value + output_ripple_voltage.value) * 1.2)
+            Constant((output_voltage.value + output_ripple_voltage.value) * 2)
         )
 
     def calc_inductor_value(
@@ -282,7 +283,7 @@ class Buck_Converter_TPS54331DR(Component):
         # I_peak and I_rms are calculated based on L_range max
         self.CMPs.L1.set_inductance(Range(L_min, L_min * 1.5))
         # Max DC resistance of 100mOhm
-        self.CMPs.L1.set_dc_resistance(Range(0, 0.5))
+        self.CMPs.L1.set_dc_resistance(Range(0, 0.3))
         self.CMPs.L1.set_rated_current(Constant(I_rms))
         self.CMPs.L1.set_tolerance(Constant(20))
 
@@ -290,7 +291,6 @@ class Buck_Converter_TPS54331DR(Component):
         self, output_voltage: Constant, output_current: Constant
     ):
         V_ggm = 800
-        gain_dc = V_ggm * self.reference_voltage / output_voltage.value
         # the datasheet mentions their 2x47uF caps can have a DC capacitance as low as 54uF, so account for that error
         C_out_actual = (
             self.CMPs.C8.capacitance.min
@@ -306,7 +306,6 @@ class Buck_Converter_TPS54331DR(Component):
             )
         )
         C_o = C_out_actual
-        # C_o = self.CMPs.C8.capacitance.min * 2 * (54 / (47 * 2))
         print(f"Co: {C_o}")
         R_esr = 1e-3
         F_co = 25e3
@@ -349,6 +348,17 @@ class Buck_Converter_TPS54331DR(Component):
         print(f"R_z = {float_to_si(R_z)}Ohm")
         print(f"C_z = {float_to_si(C_z)}F")
         print(f"C_p = {float_to_si(C_p)}F")
+
+        error_range = 0.05
+        self.CMPs.R3.set_resistance(
+            Range(R_z * (1 - error_range), R_z * (1 + error_range))
+        )
+        self.CMPs.C6.set_capacitance(
+            Range(C_z * (1 - error_range), C_z * (1 + error_range))
+        )
+        self.CMPs.C7.set_capacitance(
+            Range(C_p * (1 - error_range), C_p * (1 + error_range))
+        )
 
     def calc_component_values(
         self,
@@ -400,7 +410,7 @@ class Buck_Converter_TPS54331DR(Component):
             R1 = Resistor(TBD, tolerance=Constant(1))
             R2 = Resistor(TBD, tolerance=Constant(1))
             # compensation resistor
-            # R3 = Resistor(TBD, tolerance=Constant(1))
+            R3 = Resistor(TBD, tolerance=Constant(1))
             # R4 is omitted, not necessary in most designs
             # Divider for Vsense
             R5 = Resistor(TBD, tolerance=Constant(1))
@@ -410,13 +420,13 @@ class Buck_Converter_TPS54331DR(Component):
                 capacitance=TBD,
                 tolerance=Constant(20),
                 rated_voltage=Constant(10),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             C2 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(20),
                 rated_voltage=Constant(10),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             # input HF filter cap of 10nF
             C3 = Capacitor(
@@ -443,13 +453,13 @@ class Buck_Converter_TPS54331DR(Component):
             C6 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(5),
+                rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             C7 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(5),
+                rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # output capacitors
@@ -457,13 +467,13 @@ class Buck_Converter_TPS54331DR(Component):
                 capacitance=TBD,
                 tolerance=Constant(20),
                 rated_voltage=TBD,
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             C9 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(20),
                 rated_voltage=TBD,
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             # Catch diode
             D1 = Diode(partnumber=Constant("B340A-13-F"))
@@ -535,7 +545,7 @@ class PPK_PD(Component):
             buck = Buck_Converter_TPS54331DR(
                 input_voltage=Range(5, 22),
                 output_voltage=Constant(4),
-                output_current=Constant(3),
+                output_current=Constant(0.5),
                 output_ripple_voltage=Constant(0.001),
                 input_ripple_voltage=Constant(0.1),
             )
@@ -543,6 +553,52 @@ class PPK_PD(Component):
         self.CMPs = _CMPs(self)
 
         pick_part(self)
+
+        print(
+            f"R1 (UVLO div Ren1):     {float_to_si(self.CMPs.buck.CMPs.R1.resistance.value)}Ohm"
+        )
+        print(
+            f"R2 (UVLO div Ren2):     {float_to_si(self.CMPs.buck.CMPs.R2.resistance.value)}Ohm"
+        )
+        print(
+            f"R3 (comp R_z):          {float_to_si(self.CMPs.buck.CMPs.R3.resistance.value)}Ohm"
+        )
+        print(
+            f"R5 (Vout div1):         {float_to_si(self.CMPs.buck.CMPs.R5.resistance.value)}Ohm"
+        )
+        print(
+            f"R6 (Vout div2):         {float_to_si(self.CMPs.buck.CMPs.R6.resistance.value)}Ohm"
+        )
+        print(
+            f"C1 (input bulk 1):      {float_to_si(self.CMPs.buck.CMPs.C1.capacitance.value)}F"
+        )
+        print(
+            f"C2 (input bulk 2):      {float_to_si(self.CMPs.buck.CMPs.C2.capacitance.value)}F"
+        )
+        print(
+            f"C3 (hf input):          {float_to_si(self.CMPs.buck.CMPs.C3.capacitance.value)}F"
+        )
+        print(
+            f"C4 (boot):              {float_to_si(self.CMPs.buck.CMPs.C4.capacitance.value)}F"
+        )
+        print(
+            f"C5 (slow-start):        {float_to_si(self.CMPs.buck.CMPs.C5.capacitance.value)}F"
+        )
+        print(
+            f"C6 (comp C_z):          {float_to_si(self.CMPs.buck.CMPs.C6.capacitance.value)}F"
+        )
+        print(
+            f"C7 (comp C_p):          {float_to_si(self.CMPs.buck.CMPs.C7.capacitance.value)}F"
+        )
+        print(
+            f"C8 (output bulk 1):     {float_to_si(self.CMPs.buck.CMPs.C8.capacitance.value)}F"
+        )
+        print(
+            f"C9 (output bulk 2):     {float_to_si(self.CMPs.buck.CMPs.C9.capacitance.value)}F"
+        )
+        print(
+            f"L1 (ind):               {float_to_si(self.CMPs.buck.CMPs.L1.inductance.value)}H"
+        )
 
         # hack footprints
         for r in get_all_components(self) + [self]:
