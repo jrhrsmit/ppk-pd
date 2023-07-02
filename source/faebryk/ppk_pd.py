@@ -52,8 +52,8 @@ class Buck_Converter_TPS54331DR(Component):
     """
     Buck converter based on TPS54331.
 
-    See https://datasheet.lcsc.com/lcsc/1808272040_Texas-Instruments-TPS54331DR_C9865.pdf
-    for design details, especially figure 13 for component names and the step by step design
+    See https://www.ti.com/lit/ds/symlink/tps54331.pdf for design details,
+    especially figure 13 for component names and the step by step design
     procedure for the calculations.
     """
 
