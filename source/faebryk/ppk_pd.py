@@ -1,11 +1,3 @@
-import logging
-from typing import List
-
-logger = logging.getLogger(__name__)
-
-# local imports
-import library.lcsc as lcsc
-
 # library imports
 from faebryk.library.core import Component, Parameter
 from faebryk.library.library.interfaces import Electrical, Power
@@ -20,6 +12,15 @@ from faebryk.library.traits.component import has_footprint, has_footprint_pinmap
 # function imports
 from faebryk.library.util import get_all_components, times
 
+import logging
+
+log = logging.getLogger(__name__)
+
+from typing import List
+
+# local imports
+import library.lcsc as lcsc
+
 # Project library imports
 from library.library.components import (
     MOSFET,
@@ -29,6 +30,9 @@ from library.library.components import (
     Resistor,
     Diode,
     Inductor,
+    Mounting_Hole,
+    Faebryk_Logo,
+    Pin_Header,
 )
 
 from library.lcsc import *
@@ -114,10 +118,10 @@ class Buck_Converter_TPS54331DR(Component):
             Range(Ren2_value * (1 - resistor_range), Ren2_value * (1 + resistor_range))
         )
 
-        print(
+        log.debug(
             f"Ren1: {float_to_si(Ren1_value)}Ohm: {float_to_si(Ren1_value * (1 - resistor_range))}Ohm - {float_to_si(Ren1_value * (1 + resistor_range))}Ohm"
         )
-        print(
+        log.debug(
             f"Ren2: {float_to_si(Ren2_value)}Ohm: {float_to_si(Ren2_value * (1 - resistor_range))}Ohm - {float_to_si(Ren2_value * (1 + resistor_range))}Ohm"
         )
 
@@ -145,8 +149,8 @@ class Buck_Converter_TPS54331DR(Component):
 
         self.CMPs.R5.set_resistance(Constant(R5))
         self.CMPs.R6.set_resistance(Constant(R6))
-        print(f"R5: {R5}")
-        print(f"R6: {R6}")
+        log.debug(f"R5: {R5}")
+        log.debug(f"R6: {R6}")
 
     def calc_input_capacitors(
         self,
@@ -217,7 +221,7 @@ class Buck_Converter_TPS54331DR(Component):
         )
 
         # minimum output capacitance
-        print(f"min rip: {C_out_min_ripple}, stab: {C_out_min_stable}")
+        log.debug(f"min rip: {C_out_min_ripple}, stab: {C_out_min_stable}")
         C_out_min = max(C_out_min_ripple, C_out_min_stable)
 
         # multiply by 5, as the capacitance at the DC bias can be 5 times as low as specified
@@ -228,7 +232,7 @@ class Buck_Converter_TPS54331DR(Component):
         # capacitance will not have any effect on the choice of component.
         # C_out_min *= 2
 
-        print(f"output capacitance C_out_min: {float_to_si(C_out_min)}F")
+        log.debug(f"output capacitance C_out_min: {float_to_si(C_out_min)}F")
         self.CMPs.C8.set_capacitance(Range(C_out_min / 2, C_out_min))
         self.CMPs.C9.set_capacitance(Range(C_out_min / 2, C_out_min))
         self.CMPs.C8.set_case_size(
@@ -277,7 +281,7 @@ class Buck_Converter_TPS54331DR(Component):
         I_peak = output_current.value + output_voltage.value * (
             input_voltage.max - output_voltage.value
         ) / (1.6 * input_voltage.max * L * self.switching_frequency)
-        print(
+        log.debug(
             f"L_min: {float_to_si(L_min)}H, L: {float_to_si(L)}H, I_rms: {float_to_si(I_rms)}A, I_peak: {float_to_si(I_peak)}A"
         )
         # I_peak and I_rms are calculated based on L_range max
@@ -306,7 +310,7 @@ class Buck_Converter_TPS54331DR(Component):
             )
         )
         C_o = C_out_actual
-        print(f"Co: {C_o}")
+        log.debug(f"Co: {C_o}")
         R_esr = 1e-3
         F_co = 25e3
         R_sense = 1 / 12
@@ -340,16 +344,16 @@ class Buck_Converter_TPS54331DR(Component):
         C_z = 1 / (2 * pi * F_z1 * R_z)
         C_p = 1 / (2 * pi * F_p1 * R_z)
 
-        print(f"C_o = {float_to_si(C_o)}F")
-        print(f"Gain = {gain:.2f}dB")
-        print(f"PL = {phase_loss:.2f}deg")
-        print(f"F_z1 = {float_to_si(F_z1)}Hz")
-        print(f"F_p1 = {float_to_si(F_p1)}Hz")
-        print(f"R_z = {float_to_si(R_z)}Ohm")
-        print(f"C_z = {float_to_si(C_z)}F")
-        print(f"C_p = {float_to_si(C_p)}F")
+        log.debug(f"C_o = {float_to_si(C_o)}F")
+        log.debug(f"Gain = {gain:.2f}dB")
+        log.debug(f"PL = {phase_loss:.2f}deg")
+        log.debug(f"F_z1 = {float_to_si(F_z1)}Hz")
+        log.debug(f"F_p1 = {float_to_si(F_p1)}Hz")
+        log.debug(f"R_z = {float_to_si(R_z)}Ohm")
+        log.debug(f"C_z = {float_to_si(C_z)}F")
+        log.debug(f"C_p = {float_to_si(C_p)}F")
 
-        error_range = 0.05
+        error_range = 0.12
         self.CMPs.R3.set_resistance(
             Range(R_z * (1 - error_range), R_z * (1 + error_range))
         )
@@ -439,7 +443,7 @@ class Buck_Converter_TPS54331DR(Component):
         self.IFs = _IFs(self)
 
         class _CMPs(Component.ComponentsCls()):
-            ic = TPS54331DR()
+            U1 = TPS54331DR()
             # divider for UVLO mechanism in enable pin
             R1 = Resistor(TBD, tolerance=Constant(1))
             R2 = Resistor(TBD, tolerance=Constant(1))
@@ -487,7 +491,7 @@ class Buck_Converter_TPS54331DR(Component):
             C6 = Capacitor(
                 capacitance=TBD,
                 tolerance=Constant(10),
-                rated_voltage=Constant(25),
+                rated_voltage=Constant(16),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             C7 = Capacitor(
@@ -520,6 +524,46 @@ class Buck_Converter_TPS54331DR(Component):
             )
 
         self.CMPs = _CMPs(self)
+
+        # connect power and grounds
+        gnd = self.IFs.input.IFs.lv
+        gnd.connect(self.IFs.output.IFs.lv)
+        self.IFs.input.connect(self.CMPs.U1.IFs.Vin)
+
+        # input bulk and filter caps
+        for cap in [self.CMPs.C1, self.CMPs.C2, self.CMPs.C3]:
+            self.IFs.input.IFs.hv.connect_via(cap, gnd)
+
+        # enable UVLO divider
+        self.IFs.input.IFs.hv.connect_via(self.CMPs.R1, self.CMPs.U1.IFs.enable)
+        self.CMPs.U1.IFs.enable.connect_via(self.CMPs.R2, gnd)
+
+        # slow-start cap
+        self.CMPs.U1.IFs.slow_start.connect_via(self.CMPs.C5, gnd)
+
+        # boot capacitor
+        self.CMPs.U1.IFs.boot.connect_via(self.CMPs.C4, self.CMPs.U1.IFs.PH)
+
+        # catch diode
+        self.CMPs.D1.IFs.anode.connect(gnd)
+        self.CMPs.D1.IFs.cathode.connect(self.CMPs.U1.IFs.PH)
+
+        # compensation filter
+        self.CMPs.U1.IFs.compensation.connect_via(self.CMPs.C7, gnd)
+        self.CMPs.U1.IFs.compensation.connect_via_chain(
+            [self.CMPs.C6, self.CMPs.R3], gnd
+        )
+
+        # inductor
+        self.CMPs.U1.IFs.PH.connect_via(self.CMPs.L1, self.IFs.output.IFs.hv)
+
+        # output caps
+        self.IFs.output.IFs.hv.connect_via(self.CMPs.C8, gnd)
+        self.IFs.output.IFs.hv.connect_via(self.CMPs.C9, gnd)
+
+        # vsense divider
+        self.IFs.output.IFs.hv.connect_via(self.CMPs.R5, self.CMPs.U1.IFs.Vsense)
+        self.CMPs.U1.IFs.Vsense.connect_via(self.CMPs.R6, gnd)
 
         self.calc_component_values(
             input_voltage,
@@ -579,58 +623,67 @@ class PPK_PD(Component):
             buck = Buck_Converter_TPS54331DR(
                 input_voltage=Range(5, 22),
                 output_voltage=Constant(4),
-                output_current=Constant(0.75),
+                output_current=Constant(0.5),
                 output_ripple_voltage=Constant(0.001),
                 input_ripple_voltage=Constant(0.1),
             )
+            mounting_hole = times(4, Mounting_Hole)
+            faebryk_logo = Faebryk_Logo()
+            input_header = Pin_Header(1, 2, 2.54)
+            output_header = Pin_Header(1, 2, 2.54)
 
         self.CMPs = _CMPs(self)
 
+        self.CMPs.input_header.IFs.unnamed[0].connect(self.CMPs.buck.IFs.input.IFs.lv)
+        self.CMPs.input_header.IFs.unnamed[1].connect(self.CMPs.buck.IFs.input.IFs.hv)
+        self.CMPs.output_header.IFs.unnamed[0].connect(self.CMPs.buck.IFs.output.IFs.lv)
+        self.CMPs.output_header.IFs.unnamed[1].connect(self.CMPs.buck.IFs.output.IFs.hv)
+
         pick_part(self)
 
-        print(
+        log.debug(
             f"R1 (UVLO div Ren1):     {float_to_si(self.CMPs.buck.CMPs.R1.resistance.value)}Ohm"
         )
-        print(
+        log.debug(
             f"R2 (UVLO div Ren2):     {float_to_si(self.CMPs.buck.CMPs.R2.resistance.value)}Ohm"
         )
-        print(
+        log.debug(
             f"R3 (comp R_z):          {float_to_si(self.CMPs.buck.CMPs.R3.resistance.value)}Ohm"
         )
-        print(
+        log.debug(
             f"R5 (Vout div1):         {float_to_si(self.CMPs.buck.CMPs.R5.resistance.value)}Ohm"
         )
-        print(
+        log.debug(
             f"R6 (Vout div2):         {float_to_si(self.CMPs.buck.CMPs.R6.resistance.value)}Ohm"
         )
-        print(
+        log.debug(
             f"C1 (input bulk 1):      {float_to_si(self.CMPs.buck.CMPs.C1.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C2 (input bulk 2):      {float_to_si(self.CMPs.buck.CMPs.C2.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C3 (hf input):          {float_to_si(self.CMPs.buck.CMPs.C3.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C4 (boot):              {float_to_si(self.CMPs.buck.CMPs.C4.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C5 (slow-start):        {float_to_si(self.CMPs.buck.CMPs.C5.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C6 (comp C_z):          {float_to_si(self.CMPs.buck.CMPs.C6.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C7 (comp C_p):          {float_to_si(self.CMPs.buck.CMPs.C7.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C8 (output bulk 1):     {float_to_si(self.CMPs.buck.CMPs.C8.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"C9 (output bulk 2):     {float_to_si(self.CMPs.buck.CMPs.C9.capacitance.value)}F"
         )
-        print(
+        log.debug(
             f"L1 (ind):               {float_to_si(self.CMPs.buck.CMPs.L1.inductance.value)}H"
         )
 

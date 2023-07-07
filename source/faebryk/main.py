@@ -21,12 +21,32 @@ from faebryk.exporters.netlist.graph import (
 from faebryk.library.core import Component
 from faebryk.exporters.netlist.netlist import Component as NL_Component
 
+from library.library.components import (
+    Capacitor,
+    Resistor,
+    Inductor,
+)
+from faebryk.library.traits.component import (
+    has_type_description,
+)
+from faebryk.library.trait_impl.component import has_overriden_name_defined
+from faebryk.library.traits.component import has_overriden_name
+
 
 # logging settings
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-logging.getLogger(library.lcsc.__name__).setLevel(logging.DEBUG)
+#logger = logging.getLogger(__name__)
+#logging.basicConfig(level=logging.INFO)
+#logging.getLogger(library.lcsc.__name__).setLevel(logging.DEBUG)
 
+from rich.logging import RichHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)],
+)
+logger = logging.getLogger("rich")
 
 def write_netlist(components: List[Component], path: Path) -> bool:
     graph = make_graph_from_components(components)
@@ -60,6 +80,34 @@ def write_netlist(components: List[Component], path: Path) -> bool:
     return True
 
 
+def set_designators(components: List[Component]) -> List[Component]:
+    designator_number = {}
+    for cmp in components:
+        if isinstance(cmp, Capacitor):
+            designator_prefix = "C"
+
+        elif isinstance(cmp, Resistor):
+            designator_prefix = "R"
+        else:
+            if cmp.has_trait(has_type_description):
+                designator_prefix = cmp.get_trait(
+                    has_type_description
+                ).get_type_description()
+            else:
+                designator_prefix = "U"
+
+        if designator_prefix not in designator_number:
+            designator_number[designator_prefix] = 0
+        else:
+            designator_number[designator_prefix] += 1
+
+        cmp.add_trait(
+            has_overriden_name_defined(
+                f"{designator_prefix}{designator_number[designator_prefix]:03d}"
+            )
+        )
+
+
 def main(nonetlist: bool = False):
     # paths
     build_dir = Path("./build")
@@ -70,6 +118,8 @@ def main(nonetlist: bool = False):
 
     # graph
     G = PPK_PD()
+    # designators
+    set_designators([G])
     # netlist
     write_netlist([G], netlist_path)
 

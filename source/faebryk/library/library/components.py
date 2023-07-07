@@ -28,6 +28,12 @@ from faebryk.library.traits.parameter import (
 # Faebryk function imports
 from faebryk.library.util import times, unit_map
 
+from library.jlcpcb.util import (
+    float_to_si,
+    sort_by_basic_price,
+    si_to_float,
+)
+
 
 class MOSFET(Component):
     class ChannelType(Enum):
@@ -309,16 +315,14 @@ class Capacitor(Component):
         self.capacitance = capacitance
 
         if type(capacitance) is not Constant:
+            self.del_trait(has_type_description)
             return
         _capacitance: Constant = capacitance
 
         class _has_type_description(has_type_description.impl()):
             @staticmethod
             def get_type_description():
-                capacitance = self.capacitance
-                return unit_map(
-                    _capacitance.value, ["µF", "mF", "F", "KF", "MF", "GF"], start="F"
-                )
+                return f"{float_to_si(_capacitance.value)}F"
 
         self.add_trait(_has_type_description())
 
@@ -443,12 +447,8 @@ class Inductor(Component):
             @staticmethod
             def get_type_description():
                 assert isinstance(self.inductance, Constant)
-                inductance: Constant = self.inductance
-                return unit_map(
-                    inductance.value,
-                    ["nH", "µH", "mH", "H", "KH", "MH", "GH"],
-                    start="H",
-                )
+                _inductance: Constant = self.inductance
+                return f"{float_to_si(_inductance.value)}H"
 
         self.add_trait(_has_type_description())
 
@@ -519,10 +519,8 @@ class Resistor(Component):
             @staticmethod
             def get_type_description():
                 assert isinstance(self.resistance, Constant)
-                resistance: Constant = self.resistance
-                return unit_map(
-                    resistance.value, ["µΩ", "mΩ", "Ω", "KΩ", "MΩ", "GΩ"], start="Ω"
-                )
+                _resistance: Constant = self.resistance
+                return f"{float_to_si(_resistance.value)}"
 
         self.add_trait(_has_type_description())
 
@@ -550,6 +548,30 @@ class Mounting_Hole(Component):
                 KicadFootprint("MountingHole:MountingHole_3.2mm_M3_ISO7380")
             )
         )
+
+
+class Pin_Header(Component):
+    def __init__(self, rows: int = 1, columns: int = 1, pitch_mm=2.54) -> None:
+        super().__init__()
+
+        class _IFs(Component.InterfacesCls()):
+            unnamed = times(rows * columns, Electrical)
+
+        self.IFs = _IFs(self)
+
+        self.add_trait(has_defined_type_description("J"))
+        self.add_trait(
+            has_defined_footprint(
+                KicadFootprint(
+                    f"Connector_PinHeader_{pitch_mm:.02f}mm:PinHeader_{rows}x{columns:02d}_P{pitch_mm:.02f}mm_Vertical"
+                )
+            )
+        )
+
+        pinout = {}
+        for i in range(1, rows * columns + 1):
+            pinout[str(i)] = self.IFs.unnamed[i - 1]
+        self.add_trait(has_defined_footprint_pinmap(pinout))
 
 
 class DifferentialPair(Interface):

@@ -81,7 +81,11 @@ def pick_part(component: Component):
         elif isinstance(cmp, Capacitor):
             pick_capacitor(cmp)
 
-        elif isinstance(cmp, Mounting_Hole) or isinstance(cmp, Faebryk_Logo):
+        elif (
+            isinstance(cmp, Mounting_Hole)
+            or isinstance(cmp, Faebryk_Logo)
+            or isinstance(cmp, Pin_Header)
+        ):
             # Mechanical components have their footprint in the component defined
             pass
 

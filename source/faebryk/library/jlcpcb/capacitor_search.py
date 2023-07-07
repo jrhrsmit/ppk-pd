@@ -191,8 +191,9 @@ def log_result(lcsc_pn: str, cmp: Capacitor):
         ).get_single_representing_value()
         capacitance_str = f"{float_to_si(capacitance)}F"
 
+    cmp_name = ".".join([pname for parent, pname in cmp.get_hierarchy()])
     logger.info(
-        f"Picked {lcsc_pn: <8} for component {cmp} (value: {capacitance_str}, {tolerance}%)"
+        f"Picked {lcsc_pn: <8} for component {cmp_name} (value: {capacitance_str}, {tolerance}%)"
     )
 
 
@@ -229,7 +230,8 @@ def find_capacitor(
         """
     res = cur.execute(query).fetchall()
     if not res:
-        raise LookupError(f"Could not find capacitor for query: {query}")
+        cmp_name = ".".join([pname for parent, pname in cmp.get_hierarchy()])
+        raise LookupError(f"Could not find capacitor for cmp:\n{cmp_name}\nquery: {query}")
 
     res = sort_by_basic_price(res, quantity)
 

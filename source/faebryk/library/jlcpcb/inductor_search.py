@@ -202,8 +202,9 @@ def log_result(lcsc_pn: str, cmp: Inductor):
         ).get_single_representing_value()
         inductance_str = f"{float_to_si(inductance)}H"
 
+    cmp_name = ".".join([pname for parent, pname in cmp.get_hierarchy()])
     logger.info(
-        f"Picked {lcsc_pn: <8} for component {cmp} (value: {inductance_str}, {tolerance}%)"
+        f"Picked {lcsc_pn: <8} for component {cmp_name} (value: {inductance_str}, {tolerance}%)"
     )
 
 
