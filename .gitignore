@@ -8,10 +8,11 @@ __pycache__/
 
 # KiCad
 **-backups
-source/kicad/*/_autosave-*
-source/kicad/*/*cache
+src/kicad/*/_autosave-*
+src/kicad/*/*cache
 *.kicad_prl
 fp-info-cache
+src/kicad/production
 
 # Distribution / packaging
 .Python

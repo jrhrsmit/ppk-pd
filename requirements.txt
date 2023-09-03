@@ -1,4 +1,5 @@
-faebryk @ git+https://github.com/faebryk/faebryk@8f60313
+faebryk @ git+https://github.com/faebryk/faebryk@dba40e5124f015cc994cf6daad28ec0f552dd2d7
+pydantic == 2.0
 setuptools >= 64.0.0
 pre-commit >= 2.20.0
 isort >= 5.6.4
