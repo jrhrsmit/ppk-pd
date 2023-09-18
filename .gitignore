@@ -13,6 +13,8 @@ src/kicad/*/*cache
 *.kicad_prl
 fp-info-cache
 src/kicad/production
+*.bak
+*.lck
 
 # Distribution / packaging
 .Python
