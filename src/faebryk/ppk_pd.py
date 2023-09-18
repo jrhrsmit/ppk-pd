@@ -3,6 +3,7 @@ from faebryk.core.core import Parameter
 from faebryk.core.core import Module
 from faebryk.library.Electrical import Electrical
 from faebryk.library.ElectricPower import ElectricPower
+from faebryk.library.ElectricLogic import ElectricLogic
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
 from faebryk.library.TBD import TBD
@@ -33,11 +34,12 @@ from library.library.components import (
     Mounting_Hole,
     Faebryk_Logo,
     Pin_Header,
+    MOSFET,
 )
 
 from library.jlcpcb.part_picker import pick_part
 
-from library.e_series import e_series_ratio, E24, E48
+from library.e_series import e_series_ratio, e_series_in_range, E12, E24, E48
 from library.jlcpcb.util import float_to_si
 
 from math import sqrt, pi, log10, tan, atan, degrees, radians, exp
@@ -45,6 +47,106 @@ from math import sqrt, pi, log10, tan, atan, degrees, radians, exp
 
 class Boost_Converter_TPS61040DBVR(Module):
     pass
+
+
+class Autmatic_Sensing_Resistor_Switching(Module):
+    def set_current_range(self, current_range: Parameter):
+        assert type(current_range) == Range
+        self.current_range = current_range
+
+    def set_hysteresis(self, hysteresis: Parameter):
+        assert type(hysteresis) == Constant
+        self.hysteresis = hysteresis
+
+    def set_sense_voltage_range(self, sense_voltage_range: Parameter):
+        assert type(sense_voltage_range) == Range
+        self.sense_voltage_range = sense_voltage_range
+
+    def construct_sense_resistors(self) -> list[Resistor]:
+        sense_resistor_values = []
+        r_sense = Range(
+            self.sense_voltage_range.max / self.current_range.max,
+            self.sense_voltage_range.min / self.current_range.min,
+        )
+
+        # select first (highest) sensing resistor in E series
+        sense_resistor_values.append(
+            e_series_in_range(Range(r_sense.max, r_sense.max * 10), E12)[0]
+        )
+
+        while True:
+            r = sense_resistor_values[-1]
+            r_max_current = self.sense_voltage_range.max / r
+            if r_max_current >= self.current_range.max:
+                break
+            r_next_min = (
+                r
+                / (1 - self.hysteresis.value)
+                / (self.sense_voltage_range.max / self.sense_voltage_range.min)
+            )
+            if r_next_min < r_sense.min:
+                r_next_min = r_sense.min
+                sense_resistor_values.append(
+                    e_series_in_range(Range(r_next_min, r_next_min * 10), E12)[0]
+                )
+                break
+            sense_resistor_values.append(
+                e_series_in_range(Range(r_next_min, r_next_min * 10), E12)[0]
+            )
+
+        sense_resistors = []
+        # set case sizes according to max power
+        for r in sense_resistor_values:
+            i_max = min(self.sense_voltage_range.max / r, self.current_range.max)
+            p_max = i_max**2 * r
+            sense_resistors.append(
+                Resistor(
+                    resistance=Constant(r),
+                    tolerance=Constant(1),
+                    rated_power=Constant(p_max),
+                    case_size=Range(Resistor.CaseSize.R0402, Resistor.CaseSize.R2512),
+                ),
+            )
+            # sense_resistors[-1].set_case_size_by_power(Constant(p_max))
+
+        return sense_resistors
+
+    def __init__(
+        self,
+        sense_voltage_range: Parameter,
+        current_range: Parameter,
+        hysteresis: Parameter,
+    ) -> None:
+        super().__init__()
+
+        self.set_current_range(current_range)
+        self.set_sense_voltage_range(sense_voltage_range)
+        self.set_hysteresis(hysteresis)
+
+        sense_resistor_list = self.construct_sense_resistors()
+
+        class _IFs(Module.IFS()):
+            power_input = ElectricPower()
+            power_output = ElectricPower()
+            sense_output = Electrical()
+            resistor_status = times(len(sense_resistor_list), ElectricLogic)
+
+        class _NODEs(Module.NODES()):
+            sensing_resistors = sense_resistor_list
+            # pmos = times(
+            #     len(sense_resistor_list),
+            #     lambda: MOSFET(
+            #         channel_type=Constant(MOSFET.ChannelType.N_CHANNEL),
+            #         drain_source_voltage=Range(24, 1000),
+            #         continuous_drain_current=Range(6, 30),
+            #         drain_source_resistance=Range(0, 50e-3),
+            #         gate_source_threshold_voltage=Range(1, 4),
+            #         power_dissipation=Range(1, 10),
+            #     ),
+            # )
+
+        self.IFs = _IFs(self)
+        self.NODEs = _NODEs(self)
 
 
 class Buck_Converter_TPS54331DR(Module):
@@ -513,9 +615,10 @@ class Buck_Converter_TPS54331DR(Module):
             # Inductor
             L1 = Inductor(
                 inductance=TBD,
-                self_resonant_frequency=Range(0, self.switching_frequency * 1.2),
+                self_resonant_frequency=TBD,  # Constant(self.switching_frequency * 1.2),
                 rated_current=TBD,
                 tolerance=Constant(20),
+                inductor_type=Constant(Inductor.InductorType.Power),
             )
 
         self.NODEs = _NODEs(self)
@@ -636,6 +739,9 @@ class PPK_PD(Module):
             faebryk_logo = Faebryk_Logo()
             input_header = Pin_Header(1, 2, 2.54)
             output_header = Pin_Header(1, 2, 2.54)
+            auto_sense_resistors = Autmatic_Sensing_Resistor_Switching(
+                Range(100e-6, 100e-3), Range(1e-9, 5), Constant(0.2)
+            )
 
         self.NODEs = _NODEs(self)
 
@@ -651,6 +757,13 @@ class PPK_PD(Module):
         self.NODEs.output_header.IFs.unnamed[1].connect(
             self.NODEs.buck.IFs.output.NODEs.hv
         )
+
+        # list sense resistors and their minimum and maximum currents, and case size
+        for r in self.NODEs.auto_sense_resistors.NODEs.sensing_resistors:
+            log.info(
+                # f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A : {r.case_size.value.name}"
+                f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A"
+            )
 
         pick_part(self)
 
@@ -706,6 +819,7 @@ class PPK_PD(Module):
                 assert type(r) in [
                     Buck_Converter_TPS54331DR,
                     PPK_PD,
+                    Autmatic_Sensing_Resistor_Switching,
                 ], f"{r}"
             if not r.has_trait(can_attach_via_pinmap):
                 r.add_trait(can_attach_to_footprint_symmetrically())
