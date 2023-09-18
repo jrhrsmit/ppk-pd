@@ -14,7 +14,8 @@ from library.e_series import E24, E48, E96, E192
 
 
 def si_to_float(si_value: str) -> float:
-    return si_parse(si_value.rstrip("ΩFHAVz"))
+    si_value = si_value.replace("u", "µ")
+    return si_parse(si_value.rstrip("ΩFHAVWz"))
 
 
 def float_to_si(value: float) -> str:

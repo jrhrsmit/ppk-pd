@@ -49,20 +49,28 @@ class MOSFET(Module):
         N_CHANNEL = 1
         P_CHANNEL = 2
 
-    class SaturationType(Enum):
-        ENHANCEMENT = 1
-        DEPLETION = 2
-
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls)
         self._setup_traits()
         return self
 
-    def __init__(self, channel_type: Parameter, saturation_type: Parameter) -> None:
+    def __init__(
+        self,
+        channel_type: Parameter,
+        drain_source_voltage: Parameter,
+        continuous_drain_current: Parameter,
+        drain_source_resistance: Parameter,
+        gate_source_threshold_voltage: Parameter,
+        power_dissipation: Parameter,
+    ) -> None:
         super().__init__()
         self._setup_interfaces()
         self.set_channel_type(channel_type)
-        self.set_saturation_type(saturation_type)
+        self.set_drain_source_voltage(drain_source_voltage)
+        self.set_continuous_drain_current(continuous_drain_current)
+        self.set_drain_source_resistance(drain_source_resistance)
+        self.set_gate_source_threshold_voltage(gate_source_threshold_voltage)
+        self.set_power_dissipation(power_dissipation)
 
     def _setup_traits(self):
         self.add_trait(has_defined_kicad_ref("Q"))
@@ -79,8 +87,22 @@ class MOSFET(Module):
     def set_channel_type(self, channel_type: Parameter):
         self.channel_type = channel_type
 
-    def set_saturation_type(self, saturation_type: Parameter):
-        self.saturation_type = saturation_type
+    def set_drain_source_voltage(self, drain_source_voltage: Parameter):
+        self.drain_sorce_voltage = drain_source_voltage
+
+    def set_continuous_drain_current(self, continuous_drain_current: Parameter):
+        self.drain_sorce_voltage = continuous_drain_current
+
+    def set_drain_source_resistance(self, drain_source_resistance: Parameter):
+        self.drain_sorce_voltage = drain_source_resistance
+
+    def set_gate_source_threshold_voltage(
+        self, gate_source_threshold_voltage: Parameter
+    ):
+        self.gate_source_threshold_voltage = gate_source_threshold_voltage
+
+    def set_power_dissipation(self, power_dissipation: Parameter):
+        self.power_dissipation = power_dissipation
 
 
 class Diode(Module):
@@ -513,6 +535,7 @@ class Resistor(Module):
         resistance: Parameter,
         tolerance: Parameter = Constant(1),
         case_size: Parameter = Constant(CaseSize.R0402),
+        rated_power: Parameter = Constant(0.01),
     ):
         super().__init__()
 
@@ -520,10 +543,39 @@ class Resistor(Module):
         self.set_resistance(resistance)
         self.set_tolerance(tolerance)
         self.set_case_size(case_size)
+        self.set_rated_power(rated_power)
         self.add_trait(can_attach_to_footprint_symmetrically())
+    
+    def set_rated_power(self, rated_power: Parameter):
+        self.rated_power = rated_power
 
     def set_tolerance(self, tolerance: Parameter):
         self.tolerance = tolerance
+
+    def set_case_size(self, case_size: Parameter):
+        self.case_size = case_size
+
+    def set_case_size_by_power(self, power: Parameter):
+        assert type(power) is Constant
+        case_size_by_power = {
+            Resistor.CaseSize.R01005: 0.03125,
+            Resistor.CaseSize.R0201: 0.05,
+            Resistor.CaseSize.R0402: 0.0625,
+            Resistor.CaseSize.R0603: 0.1,
+            Resistor.CaseSize.R0805: 0.125,
+            Resistor.CaseSize.R1008: 0.2,
+            Resistor.CaseSize.R1206: 0.25,
+            Resistor.CaseSize.R1210: 0.5,
+            Resistor.CaseSize.R1806: 0.5,
+            Resistor.CaseSize.R1812: 0.75,
+            Resistor.CaseSize.R1825: 0.75,
+            Resistor.CaseSize.R2010: 0.5,
+            Resistor.CaseSize.R2512: 1,
+        }
+        for case_size, case_size_power in case_size_by_power.items():
+            if power.value < case_size_power:
+                self.case_size = Constant(case_size)
+                break
 
     def set_resistance(self, resistance: Parameter):
         self.resistance = resistance
@@ -550,9 +602,6 @@ class Resistor(Module):
                 )
 
         self.add_trait(_has_type_description())
-
-    def set_case_size(self, case_size: Parameter):
-        self.case_size = case_size
 
 
 class Faebryk_Logo(Module):

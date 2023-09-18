@@ -12,6 +12,7 @@ from library.jlcpcb.util import (
 )
 from library.e_series import e_series_in_range
 import json
+import re
 from faebryk.core.core import Module, Parameter, Footprint
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
@@ -57,7 +58,7 @@ def build_inductor_tolerance_query(inductance: Parameter, tolerance: Constant):
                 query += " OR "
             else:
                 add_or = True
-            tolerance_str_escape = tolerance_str.replace("%", "\%")
+            tolerance_str_escape = tolerance_str.replace("%", "\\%")
             query += "description LIKE '%" + plusminus + tolerance_str_escape + "%'"
             query += " ESCAPE '\\'"
 
@@ -170,97 +171,153 @@ def log_result(lcsc_pn: str, cmp: Inductor):
 
 
 def inductor_filter(
-    query_result: list[tuple[int, int, str, str]],
+    query_result: list[tuple[int, int, str, str, str]],
+    inductance: Parameter,
     rated_current: Parameter,
     dc_resistance: Parameter,
     self_resonant_frequency: Parameter,
+    inductor_type: Parameter,
 ):
+    filtered_result = []
+
+    logger.info(f"Starting out with {len(query_result)} results")
+    if type(inductance) is Constant:
+        for _, row in enumerate(query_result):
+            desc = row[4]
+            val = re.search("[0-9.]+ ?[pnuµmkMG]?H", desc)
+            if not val:
+                continue
+            try:
+                val = val.group()
+                if val != "-" and si_to_float(val) == inductance.value:
+                    filtered_result.append(row)
+            except:
+                pass
+    elif type(inductance) is Range:
+        for _, row in enumerate(query_result):
+            desc = row[4]
+            val = re.search("[0-9.]+ ?[pnuµmkMG]?H", desc)
+            if not val:
+                continue
+            val = val.group()
+            try:
+                #  logger.info(f"Regex result: '{val}', float: {si_to_float(val)}H, min: {inductance.min}, max: {inductance.max}")
+                #  logger.info(f"Regex result: '{val}', min: {si_to_float(inductance.min)}, max: {si_to_float(inductance.max)}")
+                if (
+                    si_to_float(val) >= inductance.min
+                    and si_to_float(val) <= inductance.max
+                ):
+                    filtered_result.append(row)
+            except:
+                pass
+    else:
+        raise NotImplementedError
+
+    query_result = filtered_result
+    filtered_result = []
+    logger.info(f"After inductance filtering {len(query_result)} results left")
+
     if type(rated_current) is Constant:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = attributes["Rated Current"]
-                if val == "-" or si_to_float(val) < rated_current.value:
-                    del query_result[i]
+                if val != "-" and si_to_float(val) > rated_current.value:
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON RC for C{row[0]}")
-                del query_result[i]
+                pass
     elif type(rated_current) is Range:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = si_to_float(attributes["Rated Current"])
-                if val == "-" or (val < rated_current.min or val > rated_current.max):
-                    del query_result[i]
+                if val != "-" and (val > rated_current.min and val < rated_current.max):
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON RC for C{row[0]}")
-                del query_result[i]
+                pass
     else:
         raise NotImplementedError
+
+    query_result = filtered_result
+    filtered_result = []
+
+    logger.info(f"After rated current filtering {len(query_result)} results left")
 
     if type(dc_resistance) is Constant:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = si_to_float(attributes["DC Resistance (DCR)"])
-                if val == "-" or si_to_float(val) > dc_resistance.value:
-                    del query_result[i]
+                if val != "-" and si_to_float(val) < dc_resistance.value:
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON DCR for C{row[0]}")
-                del query_result[i]
+                pass
     elif type(dc_resistance) is Range:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = si_to_float(attributes["DC Resistance (DCR)"])
-                if val == "-" or (val < dc_resistance.min or val > dc_resistance.max):
-                    del query_result[i]
+                if val != "-" and (val > dc_resistance.min and val < dc_resistance.max):
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON DCR for C{row[0]}")
-                del query_result[i]
+                pass
     else:
         raise NotImplementedError
 
+    query_result = filtered_result
+    filtered_result = []
+
+    logger.info(f"After DC resistance filtering {len(query_result)} results left")
+
+    if type(inductor_type) is Constant:
+        if inductor_type.value == Inductor.InductorType.Power:
+            logger.warn(
+                f"Self resonant frequency filtering not supported for power inductors"
+            )
+            return query_result
+
     if type(self_resonant_frequency) is Constant:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
+                logger.info(f"json:  {extra}")
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = attributes["Frequency - Self Resonant"]
-                if val == "-" or si_to_float(val) < self_resonant_frequency.value:
-                    del query_result[i]
+                if si_to_float(val) > self_resonant_frequency.value:
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON SRF for C{row[0]}")
-                del query_result[i]
+                pass
     elif type(self_resonant_frequency) is Range:
-        for i, row in enumerate(query_result):
+        for _, row in enumerate(query_result):
             try:
                 extra = row[3]
                 extra_json = json.loads(extra)
                 attributes = extra_json["attributes"]
                 val = si_to_float(attributes["Frequency - Self Resonant"])
                 if (
-                    val == "-"
-                    or val < self_resonant_frequency.min
-                    or val > self_resonant_frequency.max
+                    val > self_resonant_frequency.min
+                    and val < self_resonant_frequency.max
                 ):
-                    del query_result[i]
+                    filtered_result.append(row)
             except:
-                # logger.warn(f"Could not parse JSON SRF for C{row[0]}")
-                del query_result[i]
+                pass
     else:
         raise NotImplementedError
 
-    return query_result
+    logger.info(
+        f"After self resonant frequency filtering {len(filtered_result)} results left"
+    )
+
+    return filtered_result
 
 
 def find_inductor(
@@ -287,29 +344,29 @@ def find_inductor(
         case_size_query = build_inductor_case_size_query(cmp.case_size)
     else:
         case_size_query = "1"
-    inductance_query = build_inductor_value_query(cmp.inductance)
     tolerance_query = build_inductor_tolerance_query(cmp.inductance, cmp.tolerance)
 
     con = connect_to_db()
     cur = con.cursor()
     query = f"""
-        SELECT lcsc, basic, price, extra
+        SELECT lcsc, basic, price, extra, description
         FROM "main"."components" 
         WHERE category_id = {category}
         AND {case_size_query}
         AND stock > {moq}
-        AND {inductance_query}
         AND {tolerance_query}
         """
     res = cur.execute(query).fetchall()
+
     if not res:
         raise LookupError(f"Could not find inductor for query: {query}")
-
     res = inductor_filter(
         res,
+        inductance=cmp.inductance,
         rated_current=cmp.rated_current,
         dc_resistance=cmp.dc_resistance,
         self_resonant_frequency=cmp.self_resonant_frequency,
+        inductor_type=cmp.inductor_type,
     )
     res = [row[0:3] for row in res]
     res = sort_by_basic_price(res, quantity)

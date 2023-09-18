@@ -13,6 +13,7 @@ from library.jlcpcb.util import (
 )
 from library.e_series import e_series_in_range
 from faebryk.core.core import Module, Parameter, Footprint
+import json
 import re
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
@@ -27,40 +28,40 @@ def build_resistor_tolerance_query(resistance: Parameter, tolerance: Parameter):
     max_tolerance_percent = tolerance.value
 
     if type(resistance) is Constant:
-        resistance = resistance.value
+        r = resistance.value
     elif type(resistance) is Range:
-        resistance = resistance.min
+        r = resistance.min
     else:
         raise NotImplementedError
 
     tolerances = {
-        "0.01%": 0.0001 * resistance,
-        "0.02%": 0.0002 * resistance,
-        "0.05%": 0.0005 * resistance,
-        "0.1%": 0.001 * resistance,
-        "0.2%": 0.002 * resistance,
-        "0.25%": 0.0025 * resistance,
-        "0.5%": 0.005 * resistance,
-        "1%": 0.01 * resistance,
-        "2%": 0.02 * resistance,
-        "3%": 0.03 * resistance,
-        "5%": 0.05 * resistance,
-        "7.5%": 0.075 * resistance,
-        "10%": 0.10 * resistance,
-        "15%": 0.15 * resistance,
-        "20%": 0.20 * resistance,
-        "30%": 0.30 * resistance,
+        "0.01%": 0.0001 * r,
+        "0.02%": 0.0002 * r,
+        "0.05%": 0.0005 * r,
+        "0.1%": 0.001 * r,
+        "0.2%": 0.002 * r,
+        "0.25%": 0.0025 * r,
+        "0.5%": 0.005 * r,
+        "1%": 0.01 * r,
+        "2%": 0.02 * r,
+        "3%": 0.03 * r,
+        "5%": 0.05 * r,
+        "7.5%": 0.075 * r,
+        "10%": 0.10 * r,
+        "15%": 0.15 * r,
+        "20%": 0.20 * r,
+        "30%": 0.30 * r,
     }
     plusminus = "±"
     query = "("
     add_or = False
     for tolerance_str, tolerance_abs in tolerances.items():
-        if tolerance_abs <= max_tolerance_percent / 100 * resistance:
+        if tolerance_abs <= max_tolerance_percent / 100 * r:
             if add_or:
                 query += " OR "
             else:
                 add_or = True
-            tolerance_str_escape = tolerance_str.replace("%", "\%")
+            tolerance_str_escape = tolerance_str.replace("%", "\\%")
             query += "description LIKE '%" + plusminus + tolerance_str_escape + "%'"
             query += " ESCAPE '\\'"
 
@@ -72,9 +73,7 @@ def build_resistor_value_query(resistance: Parameter):
     if type(resistance) is Constant:
         value = resistance.value
         value_str = float_to_si(value) + "Ω"
-        query = (
-            f"(description LIKE '% {value_str}%' OR description LIKE '{value_str}%')"
-        )
+        query = f"(description COLLATE Latin1_General_BIN LIKE '% {value_str}%' OR description COLLATE Latin1_General_BIN LIKE '{value_str}%')"
         return query
     elif type(resistance) is Range:
         e_values = e_series_in_range(resistance)
@@ -86,9 +85,7 @@ def build_resistor_value_query(resistance: Parameter):
             else:
                 add_or = True
             value_str = float_to_si(value) + "Ω"
-            query += (
-                f"description LIKE '% {value_str}%' OR description LIKE '{value_str}%'"
-            )
+            query += f"(description COLLATE Latin1_General_BIN LIKE '% {value_str}%' OR description COLLATE Latin1_General_BIN LIKE '{value_str}%')"
         query += ")"
         return query
     else:
@@ -123,6 +120,22 @@ def log_result(lcsc_pn: str, cmp: Resistor):
     assert type(cmp.tolerance) is Constant
     tolerance = cmp.tolerance.value
 
+    if type(cmp.case_size) is Constant:
+        case_size_str = f"{cmp.case_size.value.name}"
+    elif type(cmp.case_size) is Range:
+        case_size_str = f"{cmp.case_size.min.name} - {cmp.case_size.max.name}"
+    else:
+        case_size_str = "<unknown case size>"
+
+    if type(cmp.rated_power) is Constant:
+        rated_power_str = f"{float_to_si(cmp.rated_power.value)}W"
+    elif type(cmp.rated_power) is Range:
+        rated_power_str = (
+            f"{float_to_si(cmp.rated_power.min)}W - {float_to_si(cmp.rated_power.max)}W"
+        )
+    else:
+        rated_power_str = "<unknown rated power>"
+
     if type(cmp.resistance) is Range:
         resistance_str = (
             f"{float_to_si(cmp.resistance.min)}Ω - {float_to_si(cmp.resistance.max)}Ω"
@@ -135,8 +148,45 @@ def log_result(lcsc_pn: str, cmp: Resistor):
 
     cmp_name = ".".join([pname for parent, pname in cmp.get_hierarchy()])
     logger.info(
-        f"Picked {lcsc_pn: <8} for component {cmp_name} (value: {resistance_str}, {tolerance}%)"
+        f"Picked {lcsc_pn: <8} for component {cmp_name} (value: {resistance_str}, {tolerance}%, {case_size_str}, {rated_power_str})"
     )
+
+
+def resistor_filter(
+    query_result: list[tuple[int, int, str, str]],
+    rated_power: Parameter,
+) -> list[tuple[int, int, str, str]]:
+    filtered_resuls = []
+    if type(rated_power) is Constant:
+        for _, row in enumerate(query_result):
+            try:
+                extra = row[3]
+                extra_json = json.loads(extra)
+                attributes = extra_json["attributes"]
+                val = attributes["Power(Watts)"]
+                if val != "-" and si_to_float(val) > rated_power.value:
+                    filtered_resuls.append(row)
+            except:
+                pass
+    elif type(rated_power) is Range:
+        for _, row in enumerate(query_result):
+            try:
+                extra = row[3]
+                extra_json = json.loads(extra)
+                attributes = extra_json["attributes"]
+                val = attributes["Power(Watts)"]
+                if (
+                    val != "-"
+                    and si_to_float(val) >= rated_power.min
+                    and si_to_float(val) <= rated_power.max
+                ):
+                    filtered_resuls.append(row)
+            except:
+                pass
+    else:
+        raise NotImplementedError
+
+    return filtered_resuls
 
 
 def find_resistor(
@@ -157,9 +207,9 @@ def find_resistor(
     con = connect_to_db()
     cur = con.cursor()
     query = f"""
-        SELECT lcsc, basic, price
+        SELECT lcsc, basic, price, extra
         FROM "main"."components" 
-        WHERE (category_id LIKE '%46%' or category_id LIKE '%52%')
+        WHERE (category_id = 46 or category_id = 52)
         AND {case_size_query}
         AND stock > {moq}
         AND {resistance_query}
@@ -170,6 +220,9 @@ def find_resistor(
     if not res:
         raise LookupError(f"Could not find resistor for query: {query}")
 
+    res = resistor_filter(res, cmp.rated_power)
+
+    res = [row[0:3] for row in res]
     res = sort_by_basic_price(res, quantity)
 
     lcsc_pn = "C" + str(res[0][0])
