@@ -128,22 +128,24 @@ class Autmatic_Sensing_Resistor_Switching(Module):
         class _IFs(Module.IFS()):
             power_input = ElectricPower()
             power_output = ElectricPower()
+            power_nmos_drive_25V = ElectricPower()
             sense_output = Electrical()
             resistor_status = times(len(sense_resistor_list), ElectricLogic)
 
         class _NODEs(Module.NODES()):
             sensing_resistors = sense_resistor_list
-            # pmos = times(
-            #     len(sense_resistor_list),
-            #     lambda: MOSFET(
-            #         channel_type=Constant(MOSFET.ChannelType.N_CHANNEL),
-            #         drain_source_voltage=Range(24, 1000),
-            #         continuous_drain_current=Range(6, 30),
-            #         drain_source_resistance=Range(0, 50e-3),
-            #         gate_source_threshold_voltage=Range(1, 4),
-            #         power_dissipation=Range(1, 10),
-            #     ),
-            # )
+            nmoses = times(
+                len(sense_resistor_list),
+                lambda: MOSFET(
+                    channel_type=Constant(MOSFET.ChannelType.N_CHANNEL),
+                    drain_source_voltage=Range(24, float('inf')),
+                    continuous_drain_current=Range(6, float('inf')),
+                    drain_source_resistance=Range(0, 20e-3),
+                    gate_source_threshold_voltage=Range(0.5, 4),
+                    power_dissipation=Range(50, float('inf')),
+                    package=TBD,
+                ),
+            )
 
         self.IFs = _IFs(self)
         self.NODEs = _NODEs(self)

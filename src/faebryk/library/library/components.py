@@ -62,6 +62,7 @@ class MOSFET(Module):
         drain_source_resistance: Parameter,
         gate_source_threshold_voltage: Parameter,
         power_dissipation: Parameter,
+        package: Parameter,
     ) -> None:
         super().__init__()
         self._setup_interfaces()
@@ -71,6 +72,7 @@ class MOSFET(Module):
         self.set_drain_source_resistance(drain_source_resistance)
         self.set_gate_source_threshold_voltage(gate_source_threshold_voltage)
         self.set_power_dissipation(power_dissipation)
+        self.set_package(package)
 
     def _setup_traits(self):
         self.add_trait(has_defined_kicad_ref("Q"))
@@ -84,17 +86,31 @@ class MOSFET(Module):
         self.IFs = _IFs(self)
         self.add_trait(can_bridge_defined(self.IFs.source, self.IFs.drain))
 
+    def map_string_to_pin(self, pin: str):
+        pin = pin.upper()
+        if pin == "S" or pin == "SOURCE":
+            return self.IFs.source
+        elif pin == "G" or pin == "GATE":
+            return self.IFs.gate
+        elif pin == "D" or pin == "DRAIN":
+            return self.IFs.drain
+        else:
+            raise ValueError(f"Unknown pin name: {pin}")
+
+    def set_package(self, package: Parameter):
+        self.package = package
+
     def set_channel_type(self, channel_type: Parameter):
         self.channel_type = channel_type
 
     def set_drain_source_voltage(self, drain_source_voltage: Parameter):
-        self.drain_sorce_voltage = drain_source_voltage
+        self.drain_source_voltage = drain_source_voltage
 
     def set_continuous_drain_current(self, continuous_drain_current: Parameter):
-        self.drain_sorce_voltage = continuous_drain_current
+        self.continuous_drain_current = continuous_drain_current
 
     def set_drain_source_resistance(self, drain_source_resistance: Parameter):
-        self.drain_sorce_voltage = drain_source_resistance
+        self.drain_source_resistance = drain_source_resistance
 
     def set_gate_source_threshold_voltage(
         self, gate_source_threshold_voltage: Parameter
@@ -545,7 +561,7 @@ class Resistor(Module):
         self.set_case_size(case_size)
         self.set_rated_power(rated_power)
         self.add_trait(can_attach_to_footprint_symmetrically())
-    
+
     def set_rated_power(self, rated_power: Parameter):
         self.rated_power = rated_power
 

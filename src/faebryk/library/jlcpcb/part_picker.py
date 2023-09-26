@@ -18,16 +18,24 @@ from library.jlcpcb.capacitor_search import find_capacitor
 from library.jlcpcb.inductor_search import find_inductor
 from library.jlcpcb.resistor_search import find_resistor
 from library.jlcpcb.partnumber_search import find_partnumber
+from library.jlcpcb.mosfet_search import find_mosfet
 
 from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
     get_value_from_pn,
+    auto_pinmapping,
 )
 from faebryk.core.core import Module, Parameter, Footprint
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
 from faebryk.library.TBD import TBD
+
+
+def pick_mosfet(cmp: MOSFET):
+    lcsc_pn = find_mosfet(cmp)
+    auto_pinmapping(component=cmp, partno=lcsc_pn)
+    lcsc.attach_footprint(component=cmp, partno=lcsc_pn)
 
 
 def pick_resistor(cmp: Resistor):
@@ -78,6 +86,9 @@ def pick_part(component: Module):
 
         elif isinstance(cmp, Capacitor):
             pick_capacitor(cmp)
+
+        elif isinstance(cmp, MOSFET):
+            pick_mosfet(cmp)
 
         elif (
             isinstance(cmp, Mounting_Hole)
