@@ -5,6 +5,7 @@ from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
     connect_to_db,
+    get_tolerance_from_str,
 )
 from library.e_series import e_series_in_range
 import json
@@ -17,7 +18,7 @@ from library.jlcpcb.util import jlcpcb_db
 logger = logging.getLogger(__name__)
 
 
-def build_inductor_tolerance_query(inductance: Parameter, tolerance: Constant):
+def build_inductor_tolerance_query(inductance: Parameter, tolerance: Parameter):
     if isinstance(tolerance, Constant):
         max_tolerance_percent = tolerance.value
         min_tolerance_percent = tolerance.value
@@ -96,7 +97,7 @@ def build_inductor_value_query(inductance: Parameter):
             # JLCPCB uses both nF and uF for caps in the >=10nF,<1uF range
             if (
                 "nF" in value_str
-                and not "." in value_str
+                and "." not in value_str
                 and len(value_str.rstrip("nF")) >= 2
             ):
                 value_uf_str = f"0.{value_str.rstrip('nF'):03}".rstrip("0") + "uF"
@@ -373,16 +374,17 @@ def find_inductor(
         case_size_query = build_inductor_case_size_query(cmp.case_size)
     else:
         case_size_query = "1"
-    tolerance_query = build_inductor_tolerance_query(cmp.inductance, cmp.tolerance)
 
     query = f"""
         {case_size_query}
         AND stock > {moq}
-        AND {tolerance_query}
         """
     db.query_category(categories, query)
 
     db.filter_results_by_extra_json_attributes("Inductance", cmp.inductance)
+    db.filter_results_by_extra_json_attributes(
+        "Tolerance", cmp.tolerance, lambda x: get_tolerance_from_str(x, cmp.inductance)
+    )
     db.filter_results_by_extra_json_attributes("Rated Current", cmp.rated_current)
     db.filter_results_by_extra_json_attributes("DC Resistance (DCR)", cmp.dc_resistance)
     db.filter_results_by_extra_json_attributes(

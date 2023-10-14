@@ -833,7 +833,7 @@ class Buck_Converter_TPS54331DR(Module):
                 inductance=TBD,
                 self_resonant_frequency=TBD,  # Constant(self.switching_frequency * 1.2),
                 rated_current=TBD,
-                tolerance=Range(0, 20),
+                tolerance=Range(0, 0.2),
                 inductor_type=Constant(Inductor.InductorType.Power),
             )
 

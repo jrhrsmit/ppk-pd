@@ -18,6 +18,8 @@ from faebryk.library.TBD import TBD
 from faebryk.core.core import Module, Parameter, Footprint
 import wget
 
+from typing import TypedDict
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,29 @@ def float_to_si(value: float) -> str:
     return si_value
 
 
+def get_tolerance_from_str(tolerance_str: str, cmp_value: Parameter) -> str:
+    try:
+        if "%" in tolerance_str:
+            tolerance = float(tolerance_str.strip("%±")) / 100
+        elif "~" in tolerance_str:
+            tolerances = tolerance_str.split("~")
+            tolerances = [float(t) for t in tolerances]
+            tolerance = max(tolerances) / 100
+        else:
+            if isinstance(cmp_value, Constant):
+                max_value = cmp_value.value
+            elif isinstance(cmp_value, Range):
+                max_value = cmp_value.max
+            else:
+                raise NotImplementedError
+            tolerance_value = si_to_float(tolerance_str.strip("±"))
+            tolerance = tolerance_value / max_value
+        return str(tolerance)
+    except Exception as e:
+        logger.info(f"Could not convert tolerance from string: {tolerance_str}, {e}")
+        return "inf"
+
+
 def get_value_from_pn(lcsc_pn: str) -> str:
     con = sqlite3.connect("jlcpcb_part_database/cache.sqlite3")
     cur = con.cursor()
@@ -64,9 +89,6 @@ def get_value_from_pn(lcsc_pn: str) -> str:
         raise LookupError(f"Could not find exact match for PN {lcsc_pn}")
     value = re.search(r'[\.0-9]+["pnuµmkMG]?[ΩFH]', res[0][0])
     return value.group()
-
-
-from typing import TypedDict
 
 
 class jlcpcb_part(TypedDict):
