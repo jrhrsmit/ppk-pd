@@ -1,25 +1,18 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
-import sqlite3
 from library.library.components import MOSFET
 from faebryk.library.has_defined_type_description import has_defined_type_description
 from library.jlcpcb.util import (
     float_to_si,
-    si_to_float,
-    get_value_from_pn,
-    sort_by_basic_price,
-    connect_to_db,
-    jlcpcb_query,
+    jlcpcb_db,
 )
-from library.e_series import e_series_in_range
-from faebryk.core.core import Module, Parameter, Footprint
-import json
-import re
+from faebryk.core.core import Parameter
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
 from faebryk.library.TBD import TBD
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_mosfet_package_query(package: Parameter) -> str:
@@ -83,93 +76,8 @@ def compare_float_against_parameter(value: float, parameter: Parameter):
     return True
 
 
-def mosfet_filter(
-    query: jlcpcb_query,
-    cmp: MOSFET,
-):
-    filtered_resuls = []
-    if type(cmp.channel_type) is Constant:
-        for r in query.results:
-            try:
-                extra_json = json.loads(r["extra"])
-            except:
-                logger.debug(f"Could not parse extra JSON for {r['extra']}")
-                continue
-
-            try:
-                attributes = extra_json["attributes"]
-            except:
-                logger.debug(
-                    f"Could not extract attributes from extra JSON for {extra_json}"
-                )
-                continue
-
-            try:
-                Id = si_to_float(attributes["Continuous Drain Current (Id)"])
-                Type = attributes["Type"]
-                Vds = si_to_float(attributes["Drain Source Voltage (Vdss)"])
-                Pd = si_to_float(attributes["Power Dissipation (Pd)"])
-                Vgs_th = si_to_float(
-                    attributes["Gate Threshold Voltage (Vgs(th)@Id)"].split("@")[0]
-                )
-                rds_on = si_to_float(
-                    attributes["Drain Source On Resistance (RDS(on)@Vgs,Id)"].split(
-                        "@"
-                    )[0]
-                )
-            except:
-                logger.debug(
-                    f"Could not extract parameters from extra JSON for {attributes}"
-                )
-                continue
-
-            if type(cmp.channel_type) != Constant:
-                raise NotImplementedError
-            if (
-                cmp.channel_type.value == MOSFET.ChannelType.N_CHANNEL
-                and Type != "N Channel"
-            ) or (
-                cmp.channel_type == cmp.ChannelType.P_CHANNEL and Type != "P Channel"
-            ):
-                continue
-
-            if (
-                compare_float_against_parameter(Id, cmp.continuous_drain_current)
-                == False
-            ):
-                logger.debug(f"Id {Id} does not match {cmp.continuous_drain_current}")
-                continue
-            if compare_float_against_parameter(Vds, cmp.drain_source_voltage) == False:
-                logger.debug(f"Vds {Vds} does not match {cmp.drain_source_voltage}")
-                continue
-            if compare_float_against_parameter(Pd, cmp.power_dissipation) == False:
-                logger.debug(f"Pd {Pd} does not match {cmp.power_dissipation}")
-                continue
-            if (
-                compare_float_against_parameter(
-                    Vgs_th, cmp.gate_source_threshold_voltage
-                )
-                == False
-            ):
-                logger.debug(
-                    f"Vgs_th {Vgs_th} does not match {cmp.gate_source_threshold_voltage}"
-                )
-                continue
-            if (
-                compare_float_against_parameter(rds_on, cmp.drain_source_resistance)
-                == False
-            ):
-                logger.debug(
-                    f"rds_on {rds_on} does not match {cmp.drain_source_resistance}"
-                )
-                continue
-
-            filtered_resuls.append(r)
-
-    query.results = filtered_resuls
-
-
 def find_mosfet(
+    db: jlcpcb_db,
     cmp: MOSFET,
     quantity: int = 1,
     moq: int = 50,
@@ -181,24 +89,45 @@ def find_mosfet(
     package_query = build_mosfet_package_query(cmp.package)
 
     query = f"""
-        SELECT lcsc, mfr, basic, price, extra, description
-        FROM "main"."components" 
-        WHERE (category_id = 97 or category_id = 98)
         {package_query}
         AND stock > {moq}
         ORDER BY basic DESC, price ASC
         """
 
-    q = jlcpcb_query(query)
+    categories = db.get_category_id(category="Transistor", subcategory="MOSFET")
 
-    mosfet_filter(q, cmp)
+    db.query_category(categories, query)
 
-    logger.info(f"Found {len(q.results)} results after filtering")
+    if isinstance(cmp.channel_type, Constant):
+        if cmp.channel_type.value == MOSFET.ChannelType.N_CHANNEL:
+            db.filter_results_by_extra_json_attributes("Type", Constant("N Channel"))
+        else:
+            db.filter_results_by_extra_json_attributes("Type", Constant("P Channel"))
 
-    sorted_res = q.sort_by_basic_price()
+    db.filter_results_by_extra_json_attributes(
+        "Continuous Drain Current (Id)", cmp.continuous_drain_current
+    )
+    db.filter_results_by_extra_json_attributes(
+        "Drain Source Voltage (Vdss)", cmp.drain_source_voltage
+    )
+    db.filter_results_by_extra_json_attributes(
+        "Power Dissipation (Pd)", cmp.power_dissipation
+    )
+    db.filter_results_by_extra_json_attributes(
+        "Gate Threshold Voltage (Vgs(th)@Id)",
+        cmp.gate_source_threshold_voltage,
+        lambda x: x.split("@")[0],
+    )
+    db.filter_results_by_extra_json_attributes(
+        "Drain Source On Resistance (RDS(on)@Vgs,Id)",
+        cmp.drain_source_resistance,
+        lambda x: x.split("@")[0],
+    )
 
-    lcsc_pn = "C" + str(q.results[0]["lcsc"])
-    cmp.add_trait(has_defined_type_description(q.results[0]["manufacturer_pn"]))
+    part = db.sort_by_basic_price(quantity)
+
+    lcsc_pn = "C" + str(part["lcsc_pn"])
+    cmp.add_trait(has_defined_type_description(part["manufacturer_pn"]))
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

@@ -1,16 +1,13 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
-import sqlite3
 from library.library.components import Capacitor
-from library.jlcpcb.util import float_to_si, sort_by_basic_price, connect_to_db
+from library.jlcpcb.util import jlcpcb_db, float_to_si
 from library.e_series import e_series_in_range
-from faebryk.core.core import Module, Parameter, Footprint
-import re
+from faebryk.core.core import Parameter
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
-from faebryk.library.TBD import TBD
+
+logger = logging.getLogger(__name__)
 
 
 def build_capacitor_temperature_coefficient_query(
@@ -40,10 +37,14 @@ def build_capacitor_temperature_coefficient_query(
 
 
 def build_capacitor_tolerance_query(capacitance: Parameter, tolerance: Constant):
-    if type(tolerance) is not Constant:
+    if isinstance(tolerance, Constant):
+        max_tolerance_percent = tolerance.value
+        min_tolerance_percent = tolerance.value
+    elif isinstance(tolerance, Range):
+        max_tolerance_percent = tolerance.max
+        min_tolerance_percent = tolerance.min
+    else:
         raise NotImplementedError
-
-    max_tolerance_percent = tolerance.value
 
     if type(capacitance) is Constant:
         value = capacitance.value
@@ -68,7 +69,10 @@ def build_capacitor_tolerance_query(capacitance: Parameter, tolerance: Constant)
     query = "("
     add_or = False
     for tolerance_str, tolerance_abs in tolerances.items():
-        if tolerance_abs <= max_tolerance_percent / 100 * value:
+        if (
+            tolerance_abs <= max_tolerance_percent / 100 * value
+            and tolerance_abs > min_tolerance_percent / 100 * value
+        ):
             if add_or:
                 query += " OR "
             else:
@@ -167,8 +171,12 @@ def build_capacitor_case_size_query(case_size: Parameter):
 
 
 def log_result(lcsc_pn: str, cmp: Capacitor):
-    assert type(cmp.tolerance) is Constant
-    tolerance = cmp.tolerance.value
+    if isinstance(cmp.tolerance, Constant):
+        tolerance = cmp.tolerance.value
+    elif isinstance(cmp.tolerance, Range):
+        tolerance = cmp.tolerance.max
+    else:
+        raise NotImplementedError
 
     if type(cmp.capacitance) is Range:
         capacitance_str = (
@@ -187,6 +195,7 @@ def log_result(lcsc_pn: str, cmp: Capacitor):
 
 
 def find_capacitor(
+    db: jlcpcb_db,
     cmp: Capacitor,
     quantity: int = 1,
     moq: int = 50,
@@ -204,29 +213,23 @@ def find_capacitor(
     )
     rated_voltage_query = build_capacitor_rated_voltage_query(cmp.rated_voltage)
 
-    con = connect_to_db()
-    cur = con.cursor()
+    categories = db.get_category_id(
+        "Capacitors", "Multilayer Ceramic Capacitors MLCC - SMD/SMT"
+    )
+
     query = f"""
-        SELECT lcsc, basic, price
-        FROM "main"."components" 
-        WHERE (category_id LIKE '%27%' OR category_id LIKE '%29%')
-        AND {case_size_query}
+        {case_size_query}
         AND stock > {moq}
         AND {temperature_coefficient_query}
         AND {capacitance_query}
         AND {tolerance_query}
         AND {rated_voltage_query}
         """
-    res = cur.execute(query).fetchall()
-    if not res:
-        cmp_name = ".".join([pname for parent, pname in cmp.get_hierarchy()])
-        raise LookupError(
-            f"Could not find capacitor for cmp:\n{cmp_name}\nquery: {query}"
-        )
+    db.query_category(categories, query)
 
-    res = sort_by_basic_price(res, quantity)
+    part = db.sort_by_basic_price(quantity)
 
-    lcsc_pn = "C" + str(res[0][0])
+    lcsc_pn = "C" + str(part["lcsc_pn"])
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

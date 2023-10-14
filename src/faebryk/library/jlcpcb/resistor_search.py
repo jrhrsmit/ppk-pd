@@ -1,31 +1,29 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
-import sqlite3
 from library.library.components import Resistor
 from library.jlcpcb.util import (
     float_to_si,
     si_to_float,
-    get_value_from_pn,
-    sort_by_basic_price,
-    connect_to_db,
+    jlcpcb_db,
 )
 from library.e_series import e_series_in_range
-from faebryk.core.core import Module, Parameter, Footprint
+from faebryk.core.core import Parameter
 import json
-import re
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
-from faebryk.library.TBD import TBD
+
+logger = logging.getLogger(__name__)
 
 
 def build_resistor_tolerance_query(resistance: Parameter, tolerance: Parameter):
-    if type(tolerance) is not Constant:
+    if isinstance(tolerance, Constant):
+        max_tolerance_percent = tolerance.value
+        min_tolerance_percent = tolerance.value
+    elif isinstance(tolerance, Range):
+        max_tolerance_percent = tolerance.max
+        min_tolerance_percent = tolerance.min
+    else:
         raise NotImplementedError
-
-    # assert type(max_tolerance_percent) is Constant
-    max_tolerance_percent = tolerance.value
 
     if type(resistance) is Constant:
         r = resistance.value
@@ -56,7 +54,10 @@ def build_resistor_tolerance_query(resistance: Parameter, tolerance: Parameter):
     query = "("
     add_or = False
     for tolerance_str, tolerance_abs in tolerances.items():
-        if tolerance_abs <= max_tolerance_percent / 100 * r:
+        if (
+            tolerance_abs <= max_tolerance_percent / 100 * r
+            and tolerance_abs > min_tolerance_percent / 100 * r
+        ):
             if add_or:
                 query += " OR "
             else:
@@ -117,8 +118,12 @@ def build_resistor_case_size_query(case_size: Parameter):
 
 
 def log_result(lcsc_pn: str, cmp: Resistor):
-    assert type(cmp.tolerance) is Constant
-    tolerance = cmp.tolerance.value
+    if isinstance(cmp.tolerance, Constant):
+        tolerance = cmp.tolerance.value
+    elif isinstance(cmp.tolerance, Range):
+        tolerance = cmp.tolerance.max
+    else:
+        raise NotImplementedError
 
     if type(cmp.case_size) is Constant:
         case_size_str = f"{cmp.case_size.value.name}"
@@ -190,6 +195,7 @@ def resistor_filter(
 
 
 def find_resistor(
+    db: jlcpcb_db,
     cmp: Resistor,
     quantity: int = 1,
     moq: int = 50,
@@ -204,28 +210,19 @@ def find_resistor(
     resistance_query = build_resistor_value_query(cmp.resistance)
     tolerance_query = build_resistor_tolerance_query(cmp.resistance, cmp.tolerance)
 
-    con = connect_to_db()
-    cur = con.cursor()
     query = f"""
-        SELECT lcsc, basic, price, extra
-        FROM "main"."components" 
-        WHERE (category_id = 46 or category_id = 52)
-        AND {case_size_query}
+        {case_size_query}
         AND stock > {moq}
         AND {resistance_query}
         AND {tolerance_query}
         ORDER BY basic DESC, price ASC
         """
-    res = cur.execute(query).fetchall()
-    if not res:
-        raise LookupError(f"Could not find resistor for query: {query}")
 
-    res = resistor_filter(res, cmp.rated_power)
+    categories = db.get_category_id("Resistors", "Chip Resistor - Surface Mount")
+    db.query_category(categories, query)
+    part = db.sort_by_basic_price(quantity)
 
-    res = [row[0:3] for row in res]
-    res = sort_by_basic_price(res, quantity)
-
-    lcsc_pn = "C" + str(res[0][0])
+    lcsc_pn = "C" + str(part["lcsc_pn"])
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

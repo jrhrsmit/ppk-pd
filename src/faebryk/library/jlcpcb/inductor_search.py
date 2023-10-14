@@ -1,30 +1,31 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
-import sqlite3
 from library.library.components import Inductor
 from library.jlcpcb.util import (
     float_to_si,
-    sort_by_basic_price,
     si_to_float,
     connect_to_db,
 )
 from library.e_series import e_series_in_range
 import json
 import re
-from faebryk.core.core import Module, Parameter, Footprint
+from faebryk.core.core import Parameter
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
-from faebryk.library.TBD import TBD
 from library.jlcpcb.util import jlcpcb_db
+
+logger = logging.getLogger(__name__)
 
 
 def build_inductor_tolerance_query(inductance: Parameter, tolerance: Constant):
-    if type(tolerance) is not Constant:
+    if isinstance(tolerance, Constant):
+        max_tolerance_percent = tolerance.value
+        min_tolerance_percent = tolerance.value
+    elif isinstance(tolerance, Range):
+        max_tolerance_percent = tolerance.max
+        min_tolerance_percent = tolerance.min
+    else:
         raise NotImplementedError
-
-    max_tolerance_percent = tolerance.value
 
     if type(inductance) is Constant:
         value = inductance.value
@@ -54,7 +55,10 @@ def build_inductor_tolerance_query(inductance: Parameter, tolerance: Constant):
     query = "("
     add_or = False
     for tolerance_str, tolerance_abs in tolerances.items():
-        if tolerance_abs <= max_tolerance_percent / 100 * value:
+        if (
+            tolerance_abs <= max_tolerance_percent / 100 * value
+            and tolerance_abs > min_tolerance_percent / 100 * value
+        ):
             if add_or:
                 query += " OR "
             else:
@@ -153,7 +157,12 @@ def build_inductor_case_size_query(case_size: Parameter):
 
 
 def log_result(lcsc_pn: str, cmp: Inductor):
-    tolerance = cmp.tolerance.value
+    if isinstance(cmp.tolerance, Constant):
+        tolerance = cmp.tolerance.value
+    elif isinstance(cmp.tolerance, Range):
+        tolerance = cmp.tolerance.max
+    else:
+        raise NotImplementedError
 
     if type(cmp.inductance) is Range:
         inductance_str = (
@@ -333,8 +342,6 @@ def set_inductor_params_from_pn(cmp: Inductor, lcsc_pn: str):
 
     if not res:
         raise LookupError(f"Could not LCSC part number {lcsc_pn} in database")
-    
-    
 
 
 def find_inductor(
@@ -350,11 +357,15 @@ def find_inductor(
 
     if type(cmp.inductor_type) != Constant:
         raise NotImplementedError
-    
+
     if cmp.inductor_type.value == Inductor.InductorType.Normal:
-        categories = db.get_category_id(category="Inductors/Coils/Transformers", subcategory="Inductors (SMD)")
+        categories = db.get_category_id(
+            category="Inductors/Coils/Transformers", subcategory="Inductors (SMD)"
+        )
     elif cmp.inductor_type.value == Inductor.InductorType.Power:
-        categories = db.get_category_id(category="Inductors/Coils/Transformers", subcategory="Power Inductors")
+        categories = db.get_category_id(
+            category="Inductors/Coils/Transformers", subcategory="Power Inductors"
+        )
     else:
         raise NotImplementedError
 
@@ -374,7 +385,9 @@ def find_inductor(
     db.filter_results_by_extra_json_attributes("Inductance", cmp.inductance)
     db.filter_results_by_extra_json_attributes("Rated Current", cmp.rated_current)
     db.filter_results_by_extra_json_attributes("DC Resistance (DCR)", cmp.dc_resistance)
-    db.filter_results_by_extra_json_attributes("Frequency - Self Resonant", cmp.self_resonant_frequency)
+    db.filter_results_by_extra_json_attributes(
+        "Frequency - Self Resonant", cmp.self_resonant_frequency
+    )
 
     part = db.sort_by_basic_price(quantity=quantity)
 

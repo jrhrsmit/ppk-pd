@@ -19,7 +19,7 @@ from faebryk.library.can_attach_to_footprint_via_pinmap import (
 # function imports
 from faebryk.libs.util import times
 from faebryk.core.util import get_all_nodes
-
+import math
 import logging
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ from library.library.components import (
     Faebryk_Logo,
     Pin_Header,
     MOSFET,
+    TL072CDT,
 )
 
 from library.jlcpcb.part_picker import pick_part
@@ -49,10 +50,131 @@ class Boost_Converter_TPS61040DBVR(Module):
     pass
 
 
-class Autmatic_Sensing_Resistor_Switching(Module):
+class Instrumentation_Amplifier_TL072CP(Module):
+    """
+    Dual Instrumentation amplifier based on 3x TL072CP.
+
+    For schematic, see https://en.wikipedia.org/wiki/Instrumentation_amplifier
+    """
+
+    def set_gain(self, gain: list[Parameter]):
+        if len(gain) != 2:
+            raise ValueError("Gain must be a list of two parameters")
+        self.gain = gain
+        if isinstance(gain, Constant):
+            # Assume R2 = R3
+            for rg, r1s in self.NODEs.rgs, self.NODEs.r1s:
+                assert r1s[0].resistance == r1s[1].resistance
+                rg.set_resistance(
+                    Constant(2 * r1s[0].resistance.value / gain.value - 1)
+                )
+        elif isinstance(gain, Range):
+            # Assume R2 = R3
+            for rg, r1s in self.NODEs.rgs, self.NODEs.r1s:
+                assert r1s[0].resistance == r1s[1].resistance
+                rg.set_resistance(
+                    Range(
+                        2 * r1s[0].resistance.value / gain.max - 1,
+                        2 * r1s[0].resistance.value / gain.min - 1,
+                    )
+                )
+
+    def __init__(self, gain: list[Parameter]) -> None:
+        super().__init__()
+
+        class _IFs(super().IFS()):
+            power_input = ElectricPower()
+            outputs = times(2, Electrical)
+            inverting_inputs = times(2, Electrical)
+            non_inverting_inputs = times(2, Electrical)
+            offsets = times(2, Electrical)
+
+        class _NODEs(super().NODES()):
+            buffers = times(2, lambda: times(2, TL072CDT))
+            differential_opamps = times(2, TL072CDT)
+            r1s = times(
+                2, lambda: times(2, lambda: Resistor(resistance=Constant(100e3)))
+            )
+            r2s = times(
+                2, lambda: times(2, lambda: Resistor(resistance=Constant(100e3)))
+            )
+            r3s = times(
+                2, lambda: times(2, lambda: Resistor(resistance=Constant(100e3)))
+            )
+            rgs = times(2, lambda: Resistor(resistance=TBD))
+
+        self.IFs = _IFs(self)
+        self.NODEs = _NODEs(self)
+
+        for (
+            inverting_input,
+            non_inverting_input,
+            output,
+            offset,
+            buffer,
+            diff_opamp,
+            r1,
+            r2,
+            r3,
+            rg,
+        ) in zip(
+            self.IFs.inverting_inputs,
+            self.IFs.non_inverting_inputs,
+            self.IFs.outputs,
+            self.IFs.offsets,
+            self.NODEs.buffers,
+            self.NODEs.differential_opamps,
+            self.NODEs.r1s,
+            self.NODEs.r2s,
+            self.NODEs.r2s,
+            self.NODEs.rgs,
+        ):
+            # Connect the buffers to the inputs
+            inverting_input.connect(buffer[0].IFs.non_inverting_input)
+            non_inverting_input.connect(buffer[1].IFs.non_inverting_input)
+            # connect R1
+            for (
+                b,
+                r,
+            ) in zip(buffer, r1):
+                b.IFs.output.connect_via(r, b.IFs.inverting_input)
+            # connect Rg
+            buffer[0].connect_via(rg, buffer[1])
+            # connect R2
+            buffer[0].IFs.output.connect_via(r2[0], diff_opamp.IFs.inverting_input)
+            buffer[1].IFs.output.connect_via(r2[1], diff_opamp.IFs.non_inverting_input)
+            # connect R3
+            diff_opamp.IFs.output.connect_via(r3[0], diff_opamp.IFs.inverting_input)
+            diff_opamp.IFs.non_inverting_input.connect_via(r3[1], offset)
+            # connect output
+            diff_opamp.IFs.output.connect(output)
+
+
+class Automatic_Sensing_Resistor_Switching(Module):
+    """
+    Automatic sensing resistor switching circuit.
+
+    This circuit automatically switches between sensing resistors to
+    match the current range. It uses a MOSFET to switch between the
+    resistors, and an instrumentation amplifier to amplify the voltage
+    drop across the resistor to the ADC range.
+
+    The power_input_logic should have a 3V margin on the negative rail
+    and a 5V margin on the positive rail of the power input.
+    power_input_logic.IFs.hv >= power_input.IFs.hv + 5V
+    power_input_logic.IFs.lv <= power_input.IFs.lv - 3V
+
+    power_input has a maximum voltage of 22V.
+
+    """
+
     def set_current_range(self, current_range: Parameter):
         assert type(current_range) == Range
         self.current_range = current_range
+
+    def set_voltage_range(self, voltage_range: Parameter):
+        assert type(voltage_range) == Range
+        self.voltage_range = voltage_range
 
     def set_hysteresis(self, hysteresis: Parameter):
         assert type(hysteresis) == Constant
@@ -61,6 +183,10 @@ class Autmatic_Sensing_Resistor_Switching(Module):
     def set_sense_voltage_range(self, sense_voltage_range: Parameter):
         assert type(sense_voltage_range) == Range
         self.sense_voltage_range = sense_voltage_range
+
+    def set_adc_voltage_range(self, adc_voltage_range: Parameter):
+        assert type(adc_voltage_range) == Range
+        self.adc_voltage_range = adc_voltage_range
 
     def construct_sense_resistors(self) -> list[Resistor]:
         sense_resistor_values = []
@@ -85,9 +211,8 @@ class Autmatic_Sensing_Resistor_Switching(Module):
                 / (self.sense_voltage_range.max / self.sense_voltage_range.min)
             )
             if r_next_min < r_sense.min:
-                r_next_min = r_sense.min
                 sense_resistor_values.append(
-                    e_series_in_range(Range(r_next_min, r_next_min * 10), E12)[0]
+                    e_series_in_range(Range(r_next_min / 10, r_sense.min), E12)[-1]
                 )
                 break
             sense_resistor_values.append(
@@ -102,7 +227,7 @@ class Autmatic_Sensing_Resistor_Switching(Module):
             sense_resistors.append(
                 Resistor(
                     resistance=Constant(r),
-                    tolerance=Constant(1),
+                    tolerance=Range(0, 1),
                     rated_power=Constant(p_max),
                     case_size=Range(Resistor.CaseSize.R0402, Resistor.CaseSize.R2512),
                 ),
@@ -113,23 +238,28 @@ class Autmatic_Sensing_Resistor_Switching(Module):
 
     def __init__(
         self,
+        voltage_range: Parameter,
         sense_voltage_range: Parameter,
+        adc_voltage_range: Parameter,
         current_range: Parameter,
         hysteresis: Parameter,
     ) -> None:
         super().__init__()
 
+        self.set_voltage_range(voltage_range)
         self.set_current_range(current_range)
         self.set_sense_voltage_range(sense_voltage_range)
         self.set_hysteresis(hysteresis)
+        self.set_adc_voltage_range(adc_voltage_range)
 
         sense_resistor_list = self.construct_sense_resistors()
 
         class _IFs(Module.IFS()):
             power_input = ElectricPower()
             power_output = ElectricPower()
-            power_nmos_drive_25V = ElectricPower()
-            sense_output = Electrical()
+            power_input_logic = ElectricPower()
+            power_input_adc = ElectricPower()
+            adc_output = times(len(sense_resistor_list), Electrical)
             resistor_status = times(len(sense_resistor_list), ElectricLogic)
 
         class _NODEs(Module.NODES()):
@@ -138,17 +268,101 @@ class Autmatic_Sensing_Resistor_Switching(Module):
                 len(sense_resistor_list),
                 lambda: MOSFET(
                     channel_type=Constant(MOSFET.ChannelType.N_CHANNEL),
-                    drain_source_voltage=Range(24, float('inf')),
-                    continuous_drain_current=Range(6, float('inf')),
-                    drain_source_resistance=Range(0, 20e-3),
-                    gate_source_threshold_voltage=Range(0.5, 4),
-                    power_dissipation=Range(50, float('inf')),
+                    drain_source_voltage=Range(25, float("inf")),
+                    continuous_drain_current=Range(5.5, float("inf")),
+                    drain_source_resistance=TBD,
+                    gate_source_threshold_voltage=Range(0.5, 8),
+                    power_dissipation=TBD,
                     package=TBD,
                 ),
+            )
+            dual_instrumentation_amplifiers = times(
+                math.ceil(len(sense_resistor_list) / 2),
+                lambda: Instrumentation_Amplifier_TL072CP(gain=TBD),
+            )
+            output_voltage_limiting_diodes = times(len(sense_resistor_list) * 2, Diode)
+            output_current_limiting_resitors = times(
+                len(sense_resistor_list), lambda: Resistor(Constant(1.8e3))
             )
 
         self.IFs = _IFs(self)
         self.NODEs = _NODEs(self)
+
+        gain_max = self.adc_voltage_range.max / self.sense_voltage_range.max
+        amp_offset_voltage = 3e-3
+        offset_error_max = (gain_max + 1) * amp_offset_voltage * 2
+        gain_max = (
+            self.adc_voltage_range.max - offset_error_max
+        ) / self.sense_voltage_range.max
+        gain = Range(0.9 * gain_max, gain_max)
+        # Set amplifier gain
+        for amp in self.NODEs.dual_instrumentation_amplifiers:
+            amp.set_gain([gain, gain])
+
+        # Set parameters for NMOSes
+        for nmos, rs in zip(self.NODEs.nmoses, self.NODEs.sensing_resistors):
+            max_rds_on = 30e-3
+            assert isinstance(rs.resistance, Constant)
+            nmos.set_drain_source_resistance(Range(0, max_rds_on))
+            # Set the maximum power dissipation
+            max_current = self.sense_voltage_range.max / rs.resistance.value
+            max_power = max_current**2 * max_rds_on
+            nmos.set_power_dissipation(Range(max_power, float("inf")))
+
+        # connect components
+        for (
+            i,
+            [nmos, rs],
+        ) in enumerate(
+            zip(
+                self.NODEs.nmoses,
+                self.NODEs.sensing_resistors,
+            )
+        ):
+            self.IFs.power_input.NODEs.hv.connect(nmos.IFs.drain)
+            nmos.IFs.source.connect_via(rs, self.IFs.power_output.NODEs.hv)
+            dual_amp_i = math.floor(i / 2)
+            amp_i = i % 2
+            nmos.IFs.source.connect(
+                self.NODEs.dual_instrumentation_amplifiers[
+                    dual_amp_i
+                ].IFs.non_inverting_inputs[amp_i]
+            )
+            self.IFs.power_output.NODEs.hv.connect(
+                self.NODEs.dual_instrumentation_amplifiers[
+                    dual_amp_i
+                ].IFs.inverting_inputs[amp_i]
+            )
+
+        # connect amplifiers to sensing resistors and output
+        for i, amp in enumerate(self.NODEs.dual_instrumentation_amplifiers):
+            self.IFs.power_input_logic.connect(amp.IFs.power_input)
+            amp.IFs.outputs[0].connect_via(
+                self.NODEs.output_current_limiting_resitors[i * 2],
+                self.IFs.adc_output[i * 2],
+            )
+            if i * 2 + 1 < len(self.NODEs.sensing_resistors):
+                break
+            amp.IFs.outputs[1].connect_via(
+                self.NODEs.output_current_limiting_resitors[i * 2 + 1],
+                self.IFs.adc_output[i * 2 + 1],
+            )
+
+        # Connect voltage limiting diodes
+        for i, output in enumerate(self.IFs.adc_output):
+            output.connect_via(
+                self.NODEs.output_voltage_limiting_diodes[2 * i],
+                self.IFs.power_input_adc.NODEs.hv,
+            )
+            self.IFs.power_input_adc.NODEs.lv.connect_via(
+                self.NODEs.output_voltage_limiting_diodes[2 * i + 1], output
+            )
+
+        self.IFs.power_input.NODEs.lv.connect(self.IFs.power_output.NODEs.lv)
+
+        # set partnumbers for voltage limiting diodes
+        for diode in self.NODEs.output_voltage_limiting_diodes:
+            diode.set_partnumber(Constant("1N5819WS"))
 
 
 class Buck_Converter_TPS54331DR(Module):
@@ -387,8 +601,8 @@ class Buck_Converter_TPS54331DR(Module):
         self.NODEs.L1.set_inductance(Range(L_min, L_min * 1.5))
         # Max DC resistance of 100mOhm
         self.NODEs.L1.set_dc_resistance(Range(0, 0.3))
-        self.NODEs.L1.set_rated_current(Constant(I_rms))
-        self.NODEs.L1.set_tolerance(Constant(20))
+        self.NODEs.L1.set_rated_current(Range(I_rms, float("inf")))
+        self.NODEs.L1.set_tolerance(Range(0, 20))
 
     def calc_compensation_filter(
         self, output_voltage: Constant, output_current: Constant
@@ -544,71 +758,71 @@ class Buck_Converter_TPS54331DR(Module):
         class _NODEs(Module.NODES()):
             U1 = TPS54331DR()
             # divider for UVLO mechanism in enable pin
-            R1 = Resistor(TBD, tolerance=Constant(1))
-            R2 = Resistor(TBD, tolerance=Constant(1))
+            R1 = Resistor(TBD, tolerance=Range(0, 1))
+            R2 = Resistor(TBD, tolerance=Range(0, 1))
             # compensation resistor
-            R3 = Resistor(TBD, tolerance=Constant(1))
+            R3 = Resistor(TBD, tolerance=Range(0, 1))
             # R4 is omitted, not necessary in most designs
             # Divider for Vsense
-            R5 = Resistor(TBD, tolerance=Constant(1))
-            R6 = Resistor(TBD, tolerance=Constant(1))
+            R5 = Resistor(TBD, tolerance=Range(0, 1))
+            R6 = Resistor(TBD, tolerance=Range(0, 1))
             # input bulk caps
             C1 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 rated_voltage=Constant(10),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             C2 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 rated_voltage=Constant(10),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             # input HF filter cap of 10nF
             C3 = Capacitor(
                 capacitance=Constant(10e-9),
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 rated_voltage=Constant(50),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # boot capacitor, always 100nF
             C4 = Capacitor(
                 capacitance=Constant(100e-9),
-                tolerance=Constant(10),
+                tolerance=Range(0, 10),
                 rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # slow-start capacitor, abs. max voltage on SS pin is 3V
             C5 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(10),
+                tolerance=Range(0, 10),
                 rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # Compensation capacitors, abs. max voltage on comp pin is 3V
             C6 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(10),
+                tolerance=Range(0, 10),
                 rated_voltage=Constant(16),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             C7 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(10),
+                tolerance=Range(0, 10),
                 rated_voltage=Constant(25),
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
             )
             # output capacitors
             C8 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 rated_voltage=TBD,
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
             C9 = Capacitor(
                 capacitance=TBD,
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 rated_voltage=TBD,
                 temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
             )
@@ -619,7 +833,7 @@ class Buck_Converter_TPS54331DR(Module):
                 inductance=TBD,
                 self_resonant_frequency=TBD,  # Constant(self.switching_frequency * 1.2),
                 rated_current=TBD,
-                tolerance=Constant(20),
+                tolerance=Range(0, 20),
                 inductor_type=Constant(Inductor.InductorType.Power),
             )
 
@@ -741,9 +955,12 @@ class PPK_PD(Module):
             faebryk_logo = Faebryk_Logo()
             input_header = Pin_Header(1, 2, 2.54)
             output_header = Pin_Header(1, 2, 2.54)
-            auto_sense_resistors = Autmatic_Sensing_Resistor_Switching(
-                Range(100e-6, 100e-3), Range(1e-9, 5), Constant(0.2)
-            )
+            # auto_sense_resistors = Automatic_Sensing_Resistor_Switching(
+            #     voltage_range=Range(0, 22),
+            #     sense_voltage_range=Range(100e-6, 100e-3),
+            #     current_range=Range(1e-9, 5),
+            #     hysteresis=Constant(0.2),
+            # )
 
         self.NODEs = _NODEs(self)
 
@@ -760,12 +977,12 @@ class PPK_PD(Module):
             self.NODEs.buck.IFs.output.NODEs.hv
         )
 
-        # list sense resistors and their minimum and maximum currents, and case size
-        for r in self.NODEs.auto_sense_resistors.NODEs.sensing_resistors:
-            log.info(
-                # f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A : {r.case_size.value.name}"
-                f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A"
-            )
+        # # list sense resistors and their minimum and maximum currents, and case size
+        # for r in self.NODEs.auto_sense_resistors.NODEs.sensing_resistors:
+        #     log.info(
+        #         # f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A : {r.case_size.value.name}"
+        #         f"{float_to_si(r.resistance.value)}Ohm : {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.min / r.resistance.value)}A - {float_to_si(self.NODEs.auto_sense_resistors.sense_voltage_range.max / r.resistance.value)}A"
+        #     )
 
         pick_part(self)
 
@@ -821,7 +1038,7 @@ class PPK_PD(Module):
                 assert type(r) in [
                     Buck_Converter_TPS54331DR,
                     PPK_PD,
-                    Autmatic_Sensing_Resistor_Switching,
+                    Automatic_Sensing_Resistor_Switching,
                 ], f"{r}"
             if not r.has_trait(can_attach_via_pinmap):
                 r.add_trait(can_attach_to_footprint_symmetrically())

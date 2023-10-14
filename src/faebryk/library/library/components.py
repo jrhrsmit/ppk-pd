@@ -42,7 +42,9 @@ from typing import List
 from library.jlcpcb.util import (
     float_to_si,
 )
-#from library.jlcpcb.inductor_search import find_inductor
+
+# from library.jlcpcb.inductor_search import find_inductor
+
 
 class MOSFET(Module):
     class ChannelType(Enum):
@@ -243,17 +245,17 @@ class TVS_Array_Common_Anode_Power(Module):
         self.NODEs.tvs.add_trait(can_attach_to_footprint_symmetrically())
 
         # connect TVS
-        self.NODEs.tvs.IFs.anode.connect(self.IFs.power.IFs.lv)
-        self.NODEs.tvs.IFs.cathode.connect(self.IFs.power.IFs.hv)
+        self.NODEs.tvs.IFs.anode.connect(self.IFs.power.NODEs.lv)
+        self.NODEs.tvs.IFs.cathode.connect(self.IFs.power.NODEs.hv)
 
         # connect all diodes_pos cathodes to power hv
         connect_all_interfaces(
-            [self.IFs.power.IFs.hv] + [d.IFs.cathode for d in self.NODEs.diodes_pos]
+            [self.IFs.power.NODEs.hv] + [d.IFs.cathode for d in self.NODEs.diodes_pos]
         )
 
         # connect all diodes_neg anodes to power lv
         connect_all_interfaces(
-            [self.IFs.power.IFs.lv] + [d.IFs.anode for d in self.NODEs.diodes_neg]
+            [self.IFs.power.NODEs.lv] + [d.IFs.anode for d in self.NODEs.diodes_neg]
         )
 
         # connect all diodes_neg cathodes to diodes_pos anodes and to the channel
@@ -512,14 +514,13 @@ class Inductor(Module):
 
     def set_case_size(self, case_size: Parameter):
         self.case_size = case_size
-    
+
     def set_partnumber(self, partnumber: Parameter):
         self.partnumber = partnumber
-    
+
     def resolve(self):
         lcsc_pn = find_inductor(self)
         self.set_partnumber(Constant(lcsc_pn))
-        
 
 
 class Resistor(Module):
@@ -777,10 +778,11 @@ class TPS54331DR(Module):
             )
         )
 
+
 class TPS543x(Module):
     def set_partnumber(self, partnumber: Parameter):
         self.partnumber = partnumber
-    
+
     def __init__(self) -> None:
         class _IFs(Module().IFS()):
             Vin = ElectricPower()
@@ -788,13 +790,12 @@ class TPS543x(Module):
             boot = Electrical()
             Vsense = Electrical()
             PH = Electrical()
-        
+
         self.IFs = _IFs(self)
 
         self.add_trait(has_defined_kicad_ref("U"))
         self.add_trait(has_defined_type_description("Buck converter"))
         self.set_partnumber(Constant("TPS5430DDAR"))
-
 
         class NC(Module().IFS()):
             # Make a different NC net for each NC pin, otherwise they are connected
@@ -811,6 +812,47 @@ class TPS543x(Module):
                     "6": self.IFs.Vin.NODEs.lv,
                     "7": self.IFs.Vin.NODEs.hv,
                     "8": self.IFs.PH,
+                }
+            )
+        )
+
+
+class TL072CDT(Module):
+    """
+    Dual JFET-Input Operational Amplifier, SOIC-8 package
+    """
+
+    def set_partnumber(self, partnumber: Parameter):
+        self.partnumber = partnumber
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        class _IFs(super().IFS()):
+            power_input = ElectricPower()
+            output = times(2, Electrical)
+            inverting_input = times(2, Electrical)
+            non_inverting_input = times(2, Electrical)
+
+        self.IFs = _IFs(self)
+
+        self.set_partnumber(Constant("TL072CDT"))
+        self.add_trait(has_defined_kicad_ref("U"))
+        self.add_trait(
+            has_defined_type_description("Dual JFET-Input Operational Amplifier")
+        )
+
+        self.add_trait(
+            can_attach_to_footprint_via_pinmap(
+                {
+                    "1": self.IFs.output[1],
+                    "2": self.IFs.inverting_input[1],
+                    "3": self.IFs.non_inverting_input[1],
+                    "4": self.IFs.power_input.NODEs.lv,
+                    "5": self.IFs.non_inverting_input[2],
+                    "6": self.IFs.inverting_input[2],
+                    "7": self.IFs.output[2],
+                    "8": self.IFs.power_input.NODEs.hv,
                 }
             )
         )
