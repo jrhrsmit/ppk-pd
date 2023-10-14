@@ -17,6 +17,7 @@ from faebryk.core.core import Module, Parameter, Footprint
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
 from faebryk.library.TBD import TBD
+from library.jlcpcb.util import jlcpcb_db
 
 
 def build_inductor_tolerance_query(inductance: Parameter, tolerance: Constant):
@@ -320,7 +321,24 @@ def inductor_filter(
     return filtered_result
 
 
+def set_inductor_params_from_pn(cmp: Inductor, lcsc_pn: str):
+    con = connect_to_db()
+    cur = con.cursor()
+    query = f"""
+        SELECT lcsc, basic, price, extra, description
+        FROM "main"."components" 
+        WHERE lcsc = {lcsc_pn}
+        """
+    res = cur.execute(query).fetchall()
+
+    if not res:
+        raise LookupError(f"Could not LCSC part number {lcsc_pn} in database")
+    
+    
+
+
 def find_inductor(
+    db: jlcpcb_db,
     cmp: Inductor,
     quantity: int = 1,
     moq: int = 50,
@@ -332,11 +350,11 @@ def find_inductor(
 
     if type(cmp.inductor_type) != Constant:
         raise NotImplementedError
-
+    
     if cmp.inductor_type.value == Inductor.InductorType.Normal:
-        category = 12  # SMD inductors
+        categories = db.get_category_id(category="Inductors/Coils/Transformers", subcategory="Inductors (SMD)")
     elif cmp.inductor_type.value == Inductor.InductorType.Power:
-        category = 13  # Power inductors
+        categories = db.get_category_id(category="Inductors/Coils/Transformers", subcategory="Power Inductors")
     else:
         raise NotImplementedError
 
@@ -346,32 +364,21 @@ def find_inductor(
         case_size_query = "1"
     tolerance_query = build_inductor_tolerance_query(cmp.inductance, cmp.tolerance)
 
-    con = connect_to_db()
-    cur = con.cursor()
     query = f"""
-        SELECT lcsc, basic, price, extra, description
-        FROM "main"."components" 
-        WHERE category_id = {category}
-        AND {case_size_query}
+        {case_size_query}
         AND stock > {moq}
         AND {tolerance_query}
         """
-    res = cur.execute(query).fetchall()
+    db.query_category(categories, query)
 
-    if not res:
-        raise LookupError(f"Could not find inductor for query: {query}")
-    res = inductor_filter(
-        res,
-        inductance=cmp.inductance,
-        rated_current=cmp.rated_current,
-        dc_resistance=cmp.dc_resistance,
-        self_resonant_frequency=cmp.self_resonant_frequency,
-        inductor_type=cmp.inductor_type,
-    )
-    res = [row[0:3] for row in res]
-    res = sort_by_basic_price(res, quantity)
+    db.filter_results_by_extra_json_attributes("Inductance", cmp.inductance)
+    db.filter_results_by_extra_json_attributes("Rated Current", cmp.rated_current)
+    db.filter_results_by_extra_json_attributes("DC Resistance (DCR)", cmp.dc_resistance)
+    db.filter_results_by_extra_json_attributes("Frequency - Self Resonant", cmp.self_resonant_frequency)
 
-    lcsc_pn = "C" + str(res[0][0])
+    part = db.sort_by_basic_price(quantity=quantity)
+
+    lcsc_pn = "C" + str(part["lcsc_pn"])
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

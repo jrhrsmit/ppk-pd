@@ -2,6 +2,8 @@ import logging
 from typing import Tuple
 import json
 import subprocess
+from pathlib import Path
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +13,13 @@ import re
 from si_prefix import SI_PREFIX_UNITS, si_format, si_parse
 from math import log10, ceil, floor
 from library.e_series import E24, E48, E96, E192
+
+from faebryk.library.Constant import Constant
+from faebryk.library.Range import Range
+from faebryk.library.TBD import TBD
+from faebryk.core.core import Module, Parameter, Footprint
+import wget
+
 
 
 def si_to_float(si_value: str) -> float:
@@ -57,30 +66,72 @@ def get_value_from_pn(lcsc_pn: str) -> str:
     value = re.search(r'[\.0-9]+["pnuµmkMG]?[ΩFH]', res[0][0])
     return value.group()
 
-class jlcpcb_query:
-    def __init__(self, query: str) -> None:
-        con = connect_to_db()
-        cur = con.cursor()
+from typing import TypedDict
 
-        query_result = cur.execute(query).fetchall()
-        if not query_result:
-            raise LookupError(f"Could not find resistor for query: {query}")
+class jlcpcb_part(TypedDict):
+    lcsc_pn: str
+    manufacturer_pn: str
+    basic: int
+    price: str
+    extra: str
+    description: str
 
+
+def connect_to_db(jlcpcb_db_path: str) -> sqlite3.Connection:
+    script_path = "./jlcpcb_part_database/fetch.sh"
+    # create the dir if it doesn't exist
+    os.makedirs(os.path.dirname(jlcpcb_db_path), exist_ok=True)
+    # download the db if it doesn't exist
+    if not os.path.isfile(jlcpcb_db_path):
+        answer = input(
+            "JLCPCB database not yet downloaded. Download now? (~5.8GB) [Y/n]"
+        )
+        if answer == "" or answer.lower() == "y":
+            rc = subprocess.call(script_path)
+        else:
+            exit(1)
+    
+    # check if the db is older than a week
+    if os.path.getmtime(jlcpcb_db_path) < time.time() - (3600 * 24 * 7):
+        answer = input(
+            "JLCPCB database is older than a week. Download now? (~5.8GB) [Y/n]"
+        )
+        if answer == "" or answer.lower() == "y":
+            rc = subprocess.call(script_path)
+        else:
+            logger.warning("Using old JLCPCB database")
+
+    return sqlite3.connect(jlcpcb_db_path)
+
+
+def jlcpcb_download_db(jlcpcb_db_path: str):
+    prompt_update = False
+
+    if not jlcpcb_db_path.parent.is_dir:
+        os.makedirs(jlcpcb_db_path)
+
+    if not jlcpcb_db_path.is_file:
+        print(f"No JLCPCB database file in {jlcpcb_db_path}.")
+        prompt_update = True
+    if os.path.getmtime(jlcpcb_db_path) < time.time() - (3600 * 24):
+        print(f"JLCPCB database file in {jlcpcb_db_path} is more than a day old.")
+        prompt_update = True
+    
+    if prompt_update:
+        ans = input(f"Update JLCPCB database? [Y/n]:").lower()
+        if ans == "y" or ans == "":
+            for i in range(1, 7):
+                wget.download(f"https://yaqwsx.github.io/jlcparts/data/cache.z0{i}", out=jlcpcb_db_path.parent)
+            subprocess.run(["7z", "x", "cache.zip"])
+
+
+class jlcpcb_db:
+    def __init__(self, db_path:str) -> None:
+        self.con = connect_to_db(db_path)
+        self.cur = self.con.cursor()
         self.results = []
-        for r in query_result:
-            self.results.append(
-                {
-                    "lcsc": r[0],
-                    "manufacturer_pn": r[1],
-                    "basic": r[2],
-                    "price": r[3],
-                    "extra": r[4],
-                    "description": r[5],
-                }
-            )
-        logger.info(f"Found {len(self.results)} results")
-
-    def sort_by_basic_price(self, quantity: int = 1):
+    
+    def sort_by_basic_price(self, quantity: int = 1) -> jlcpcb_part:
         """
         Sort query by basic and price
 
@@ -99,49 +150,101 @@ class jlcpcb_query:
                     break
 
         self.results = sorted(
-            self.results, key=lambda row: (-row["basic"], row["price"])
+            results, key=lambda row: (-row["basic"], row["price"])
         )
 
+        return self.results[0]
 
-def sort_by_basic_price(
-    query_results: list[Tuple[int, int, str]], quantity: int = 1
-) -> list[Tuple[int, int, float]]:
-    """
-    Sort query by basic and priceS
+    def get_part(self, lcsc_pn: str) -> jlcpcb_part:
+        pn = lcsc_pn.strip("C")
+        query = f"""
+            SELECT lcsc, mfr, basic, price, extra, description
+            FROM "main"."components" 
+            WHERE lcsc = {pn}
+            """
+        res = self.cur.execute(query).fetchall()
+        if len(res) != 1:
+            raise LookupError(f"Could not find exact match for PN {lcsc_pn}")
+        
+        return {
+            "lcsc_pn": res[0][0],
+            "manufacturer_pn": res[0][1],
+            "basic": res[0][2],
+            "price": res[0][3],
+            "extra": res[0][4],
+            "description": res[0][5],
+        }
 
-    Takes a query result in the form of (PN, basic, price JSON).
-    Converts the price JSON to the price at that quantity as a float, and sorts it by basic, and then price
-    """
+    def get_category_id(self, category: str, subcategory: str) -> list[int]:
+        query = f"""
+            SELECT id 
+            FROM "main"."components" 
+            WHERE category LIKE '{category}'
+            AND subcategory LIKE '{query}'
+            """
+        res = self.cur.execute(query).fetchall()
+        if len(res) < 1:
+            raise LookupError(f"Could not find exact match for category {category} and subcategory {subcategory}")
+        return [r[0] for r in res]
 
-    for i, result in enumerate(query_results):
-        price_json = json.loads(result[2])
-        for price_range in price_json:
-            if quantity <= price_range["qTo"] or price_range["qTo"] == "null":
-                result_copy = list(query_results[i])
-                result_copy[0] = int(result_copy[0])
-                result_copy[1] = int(result_copy[1])
-                result_copy[2] = float(price_range["price"])
-                query_results[i] = result_copy
-                break
-
-    return sorted(query_results, key=lambda row: (-row[1], row[2]))
-
-
-def connect_to_db() -> sqlite3.Connection:
-    path = "jlcpcb_part_database/cache.sqlite3"
-    script_path = "./jlcpcb_part_database/fetch.sh"
-    # create the dir if it doesn't exist
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.isfile(path):
-        answer = input(
-            "JLCPCB database not yet downloaded. Download now? (~5.8GB) [Y/n]"
-        )
-        if answer == "" or answer.lower() == "y":
-            rc = subprocess.call(script_path)
+    
+    def query_category(self, category_id: list[int], query: str) -> list[jlcpcb_part]:
+        query = f"""
+            SELECT lcsc, mfr, basic, price, extra, description
+            FROM "main"."components" 
+            WHERE category = '{category_id}'
+            AND {query}
+            """
+        res = self.cur.execute(query).fetchall()
+        if len(res) == 0:
+            raise LookupError(f"Could not find any parts in category {category_id}")
+        
+        parts = []
+        for r in res:
+            parts.append({
+                "lcsc_pn": r[0],
+                "manufacturer_pn": r[1],
+                "basic": r[2],
+                "price": r[3],
+                "extra": r[4],
+                "description": r[5],
+            })
+        self.results = parts
+        return parts
+    
+    def filter_results_by_extra_json_attributes(self, key: str, value: Parameter) -> None:
+        filtered_results = []
+        if isinstance(value, Constant):
+            for _, part in enumerate(self.results):
+                try:
+                    extra_json = json.loads(part['extra'])
+                    attributes = extra_json["attributes"]
+                    part_val = si_to_float(attributes[key])
+                    if part_val == value.value:
+                        filtered_results.append(part)
+                except Exception as e:
+                    logger.debug(f"Could not parse part {part}, {e}")
+        elif isinstance(value, Range):
+            for _, part in enumerate(self.results):
+                try:
+                    extra_json = json.loads(part['extra'])
+                    attributes = extra_json["attributes"]
+                    part_val = si_to_float(attributes[key])
+                    if part_val > value.min and part_val < value.max:
+                        filtered_results.append(part)
+                except:
+                    logger.debug(f"Could not parse part {part}, {e}")
         else:
-            exit(1)
+            raise NotImplementedError
+        
+        self.results = filtered_results
 
-    return sqlite3.connect(path)
+
+
+
+
+
+
 
 
 from faebryk.library.can_attach_to_footprint_via_pinmap import (

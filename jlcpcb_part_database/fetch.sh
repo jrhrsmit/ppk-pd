@@ -11,6 +11,9 @@ function fetch_part () {
     wget "$url"
 }
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+cd "$SCRIPT_DIR"
+
 fetch_main &
 for i in {1..7}; do
     fetch_part $i &

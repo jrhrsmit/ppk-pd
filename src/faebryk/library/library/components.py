@@ -42,7 +42,7 @@ from typing import List
 from library.jlcpcb.util import (
     float_to_si,
 )
-
+#from library.jlcpcb.inductor_search import find_inductor
 
 class MOSFET(Module):
     class ChannelType(Enum):
@@ -78,7 +78,7 @@ class MOSFET(Module):
         self.add_trait(has_defined_kicad_ref("Q"))
 
     def _setup_interfaces(self):
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             source = Electrical()
             gate = Electrical()
             drain = Electrical()
@@ -127,7 +127,7 @@ class Diode(Module):
 
     def _setup_interfaces(self):
         # interfaces
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             anode = Electrical()
             cathode = Electrical()
 
@@ -175,7 +175,7 @@ class TVS_Array_Common_Anode(Module):
         # setup
         self.add_trait(has_defined_kicad_ref("D"))
 
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             anode = Electrical()
             cathodes = times(self.num_channels.value, Electrical)
 
@@ -220,7 +220,7 @@ class TVS_Array_Common_Anode_Power(Module):
         # setup
         self.add_trait(has_defined_kicad_ref("D"))
 
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             power = ElectricPower()
             channels = times(self.num_channels.value, Electrical)
 
@@ -293,7 +293,7 @@ class Fuse(Module):
         self.set_trip_current(trip_current)
 
         # interfaces
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             unnamed = times(2, Electrical)
 
         self.IFs = _IFs(self)
@@ -362,7 +362,7 @@ class Capacitor(Module):
         pass
 
     def _setup_interfaces(self):
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             unnamed = times(2, Electrical)
 
         self.IFs = _IFs(self)
@@ -440,7 +440,7 @@ class Inductor(Module):
         Power = 2
 
     def _setup_interfaces(self):
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             unnamed = times(2, Electrical)
 
         self.IFs = _IFs(self)
@@ -512,6 +512,14 @@ class Inductor(Module):
 
     def set_case_size(self, case_size: Parameter):
         self.case_size = case_size
+    
+    def set_partnumber(self, partnumber: Parameter):
+        self.partnumber = partnumber
+    
+    def resolve(self):
+        lcsc_pn = find_inductor(self)
+        self.set_partnumber(Constant(lcsc_pn))
+        
 
 
 class Resistor(Module):
@@ -534,7 +542,7 @@ class Resistor(Module):
         pass
 
     def _setup_interfaces(self):
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             unnamed = times(2, Electrical)
 
         self.IFs = _IFs(self)
@@ -648,7 +656,7 @@ class Pin_Header(Module):
     def __init__(self, rows: int = 1, columns: int = 1, pitch_mm=2.54) -> None:
         super().__init__()
 
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             unnamed = times(rows * columns, Electrical)
 
         self.IFs = _IFs(self)
@@ -680,7 +688,7 @@ class TPD6S300ARUKR(Module):
     def __init__(self) -> None:
         super().__init__()
 
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             # Pins names start at 1 so make idx 0 empty
             SBU = times(2, Electrical)
             C_SBU = times(2, Electrical)
@@ -694,7 +702,7 @@ class TPD6S300ARUKR(Module):
 
         self.IFs = _IFs(self)
 
-        class NC(super().IFS()):
+        class NC(Module().IFS()):
             # Make a different NC net for each NC pin, otherwise they are connected
             NC = times(2, Electrical)
 
@@ -739,7 +747,7 @@ class TPS54331DR(Module):
     def __init__(self) -> None:
         super().__init__()
 
-        class _IFs(super().IFS()):
+        class _IFs(Module().IFS()):
             boot = Electrical()
             Vin = ElectricPower()
             enable = Electrical()
@@ -764,6 +772,44 @@ class TPS54331DR(Module):
                     "5": self.IFs.Vsense,
                     "6": self.IFs.compensation,
                     "7": self.IFs.Vin.NODEs.lv,
+                    "8": self.IFs.PH,
+                }
+            )
+        )
+
+class TPS543x(Module):
+    def set_partnumber(self, partnumber: Parameter):
+        self.partnumber = partnumber
+    
+    def __init__(self) -> None:
+        class _IFs(Module().IFS()):
+            Vin = ElectricPower()
+            enable = Electrical()
+            boot = Electrical()
+            Vsense = Electrical()
+            PH = Electrical()
+        
+        self.IFs = _IFs(self)
+
+        self.add_trait(has_defined_kicad_ref("U"))
+        self.add_trait(has_defined_type_description("Buck converter"))
+        self.set_partnumber(Constant("TPS5430DDAR"))
+
+
+        class NC(Module().IFS()):
+            # Make a different NC net for each NC pin, otherwise they are connected
+            NC = times(2, Electrical)
+
+        self.add_trait(
+            can_attach_to_footprint_via_pinmap(
+                {
+                    "1": self.IFs.boot,
+                    "2": NC.NC[0],
+                    "3": NC.NC[1],
+                    "4": self.IFs.Vsense,
+                    "5": self.IFs.enable,
+                    "6": self.IFs.Vin.NODEs.lv,
+                    "7": self.IFs.Vin.NODEs.hv,
                     "8": self.IFs.PH,
                 }
             )
