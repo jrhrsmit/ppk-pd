@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Callable
+from typing import Tuple, Callable, Any
 import json
 import subprocess
 from pathlib import Path
@@ -20,8 +20,15 @@ import wget
 
 from typing import TypedDict
 
-logger = logging.getLogger(__name__)
+# import asyncio
+from tortoise import Tortoise
+from tortoise.models import Model
+from tortoise.fields import JSONField, IntField, CharField
+from tortoise.expressions import Q
 
+from library.components import Resistor
+
+logger = logging.getLogger(__name__)
 
 def si_to_float(si_value: str) -> float:
     si_value = si_value.replace("u", "µ")
@@ -151,52 +158,62 @@ def jlcpcb_download_db(jlcpcb_db_path: Path):
             subprocess.run(["7z", "x", "cache.zip"])
 
 
+class Category(Model):
+    id = IntField(pk=True)
+    category = CharField(max_length=255)
+    subcategory = CharField(max_length=255)
+
+    class Meta:
+        table = "categories"
+
+
+class Component(Model):
+    lcsc = IntField(pk=True)
+    category_id = IntField()
+    mfr = CharField(max_length=255)
+    package = CharField(max_length=255)
+    joints = IntField()
+    manufacturer_id = IntField()
+    basic = IntField()
+    description = CharField(max_length=255)
+    datasheet = CharField(max_length=255)
+    stock = IntField()
+    price = JSONField()
+    last_update = IntField()
+    extra = JSONField()
+    flag = IntField()
+    last_on_stock = IntField()
+
+    class Meta:
+        table = "components"
+
+
 class jlcpcb_db:
-    def __init__(self, db_path: str) -> None:
-        self.con = connect_to_db(db_path)
-        self.cur = self.con.cursor()
+    async def __init__(
+        self, db_path: str = "sqlite://jlcpcb_part_database/cache.sqlite3"
+    ) -> None:
         self.results = []
-
-    def sort_by_basic_price(self, quantity: int = 1) -> jlcpcb_part:
-        """
-        Sort query by basic and price
-
-        Takes a query result in the form of (PN, basic, price JSON).
-        Converts the price JSON to the price at that quantity as a float, and sorts it by basic, and then price
-        """
-
-        results = []
-        for i, result in enumerate(self.results):
-            price_json = json.loads(result["price"])
-            for price_range in price_json:
-                if quantity <= price_range["qTo"] or price_range["qTo"] == "null":
-                    results.append(self.results[i])
-                    results[-1]["basic"] = int(results[-1]["basic"])
-                    results[-1]["price"] = float(price_range["price"])
-                    break
-
-        self.results = sorted(results, key=lambda row: (-row["basic"], row["price"]))
-
-        return self.results[0]
+        await Tortoise.init(
+            db_url=db_path,
+            modules={
+                "models": [__name__]
+            },  # Use __name__ to refer to the current module
+        )
 
     def get_part(self, lcsc_pn: str) -> jlcpcb_part:
-        pn = lcsc_pn.strip("C")
-        query = f"""
-            SELECT lcsc, mfr, basic, price, extra, description
-            FROM "main"."components" 
-            WHERE lcsc = {pn}
-            """
-        res = self.cur.execute(query).fetchall()
-        if len(res) != 1:
+        res = Component.filter(
+            lcsc=lcsc_pn.strip("C"),
+        )
+        if res.count() != 1:
             raise LookupError(f"Could not find exact match for PN {lcsc_pn}")
-
+        res = res.first()
         return {
-            "lcsc_pn": res[0][0],
-            "manufacturer_pn": res[0][1],
-            "basic": res[0][2],
-            "price": res[0][3],
-            "extra": res[0][4],
-            "description": res[0][5],
+            "lcsc_pn": res.lcsc,
+            "manufacturer_pn": res.mfr,
+            "basic": res.basic,
+            "price": res.price,
+            "extra": res.extra,
+            "description": res.description,
         }
 
     def get_part_by_manufacturer_pn(self, partnumber: str, moq: int = 1):
@@ -212,21 +229,59 @@ class jlcpcb_db:
             raise LookupError(f"Could not find partnumber for query: {query}")
         return "C" + str(res[0])
 
-    def get_category_id(self, category: str, subcategory: str) -> list[int]:
-        query = f"""
-            SELECT id 
-            FROM "main"."categories" 
-            WHERE category LIKE '{category}'
-            AND subcategory LIKE '{subcategory}'
-            """
-        res = self.cur.execute(query).fetchall()
-        if len(res) < 1:
+    async def get_category_id(
+        self, category: str = "", subcategory: str = ""
+    ) -> list[dict[str, Any]]:
+        filter_query = Q()
+        if category != "":
+            filter_query &= Q(category__icontains=category)
+        if subcategory != "":
+            filter_query &= Q(subcategory__icontains=subcategory)
+        category_ids = await Category.filter(filter_query).values("id")
+        if len(category_ids) < 1:
             raise LookupError(
-                f"Could not find exact match for category {category} and subcategory {subcategory}"
+                f"Could not find a match for category {category} and subcategory {subcategory}"
             )
-        return [r[0] for r in res]
+        return [c["id"] for c in category_ids]
 
-    def query_category(self, category_id: list[int], query: str) -> list[jlcpcb_part]:
+    def build_query(self, key: str, p: Parameter) -> Q:
+        filter_dict = {}
+        if isinstance(p, Constant):
+            filter_dict[key] = p.value
+            return Q(**filter_dict)
+        elif isinstance(p, Range):
+            filter_dict[key + "__gte"] = p.min
+            filter_dict[key + "__lte"] = p.max
+            return Q(**filter_dict)
+        elif isinstance(p, TBD):
+            logger.warning(f"Skipping filter for key '{key}'', parameter type TBD.")
+            return Q()
+        else:
+            raise NotImplementedError
+
+    async def find_resistor(self, cmp: Resistor):
+        category_ids = await self.get_category_id("Resistors", "Chip Resistors - Surface Mount")
+        filter_query = Q(category_id__in=category_ids)
+        filter_query &= self.build_query("attributes__Resistance", cmp.resistance)
+        filter_query &= self.build_query("attributes__Tolerance", cmp.tolerance)
+        filter_query &= self.build_query("attributes__Power", cmp.power)
+
+        
+
+
+    async def query_category(
+        self, category: str = "", subcategory: str = "", 
+    ) -> list[jlcpcb_part]:
+        category_ids = await self.get_category_id(category, subcategory)
+        res = await Component.filter(
+            category_id__in=category_ids,
+            extra__contains=[
+                {"attributes__Resistance": value_to_find},
+                {"attributes__Tolerance": tolerance_to_find},
+            ],
+            # extra__contains={"Tolerance": tolerance_to_find}
+        ).first()
+
         category_query = f"(category_id = {category_id[0]}"
         for id in category_id[1:]:
             category_query += f" OR category_id = {id}"
@@ -241,6 +296,12 @@ class jlcpcb_db:
         if len(res) == 0:
             raise LookupError(f"Could not find any parts in category {category_id}")
 
+        res = Component.filter(
+            category_id=category_id,
+        ).order_by("-basic", "price")
+        if res.count() != 1:
+            raise LookupError(f"Could not find exact match for PN {lcsc_pn}")
+        res = res.first()
         parts = []
         for r in res:
             parts.append(
