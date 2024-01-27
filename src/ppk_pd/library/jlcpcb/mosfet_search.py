@@ -1,16 +1,18 @@
 import logging
 
-from library.library.components import MOSFET
-from faebryk.library.has_defined_type_description import has_defined_type_description
+from faebryk.core.core import Parameter
+from faebryk.library.Constant import Constant
+from faebryk.library.has_designator_prefix_defined import has_designator_prefix_defined
+from faebryk.library.has_simple_value_representation_defined import (
+    has_simple_value_representation_defined,
+)
+from faebryk.library.Range import Range
+from faebryk.library.TBD import TBD
 from library.jlcpcb.util import (
     float_to_si,
     jlcpcb_db,
 )
-from faebryk.core.core import Parameter
-from faebryk.library.Constant import Constant
-from faebryk.library.Range import Range
-from faebryk.library.TBD import TBD
-
+from library.library.components import MOSFET
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +129,7 @@ def find_mosfet(
     part = db.sort_by_basic_price(quantity)
 
     lcsc_pn = "C" + str(part["lcsc_pn"])
-    cmp.add_trait(has_defined_type_description(part["manufacturer_pn"]))
+    cmp.add_trait(has_simple_value_representation_defined(part["manufacturer_pn"]))
     log_result(lcsc_pn, cmp)
 
     return lcsc_pn

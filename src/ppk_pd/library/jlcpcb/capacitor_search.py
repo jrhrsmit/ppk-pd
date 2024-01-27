@@ -1,11 +1,11 @@
 import logging
 
-from library.library.components import Capacitor
-from library.jlcpcb.util import jlcpcb_db, float_to_si
-from library.e_series import e_series_in_range
 from faebryk.core.core import Parameter
+from faebryk.library.Capacitor import Capacitor
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
+from library.e_series import e_series_in_range
+from library.jlcpcb.util import float_to_si, jlcpcb_db
 
 logger = logging.getLogger(__name__)
 

@@ -1,49 +1,56 @@
 # library imports
-from faebryk.core.core import Parameter
-from faebryk.core.core import Module
-from faebryk.library.Electrical import Electrical
-from faebryk.library.ElectricPower import ElectricPower
-from faebryk.library.ElectricLogic import ElectricLogic
-from faebryk.library.Constant import Constant
-from faebryk.library.Range import Range
-from faebryk.library.TBD import TBD
-from faebryk.library.has_footprint import has_footprint
-from faebryk.library.can_attach_via_pinmap import can_attach_via_pinmap
+import logging
+import math
+
+# Project library imports
+from math import atan, degrees, exp, log10, pi, radians, sqrt, tan  # noqa: E402
+
+from faebryk.core.core import Module, Parameter
+from faebryk.core.util import get_all_nodes
 from faebryk.library.can_attach_to_footprint_symmetrically import (
     can_attach_to_footprint_symmetrically,
 )
 from faebryk.library.can_attach_to_footprint_via_pinmap import (
     can_attach_to_footprint_via_pinmap,
 )
+from faebryk.library.can_attach_via_pinmap import can_attach_via_pinmap
+from faebryk.library.Capacitor import Capacitor
+from faebryk.library.Constant import Constant
+from faebryk.library.Diode import Diode
+from faebryk.library.Electrical import Electrical
+from faebryk.library.ElectricLogic import ElectricLogic
+from faebryk.library.ElectricPower import ElectricPower
+from faebryk.library.has_footprint import has_footprint
+from faebryk.library.Range import Range
+from faebryk.library.Resistor import Resistor
+from faebryk.library.TBD import TBD
 
 # function imports
 from faebryk.libs.util import times
-from faebryk.core.util import get_all_nodes
-import math
-import logging
-
-log = logging.getLogger(__name__)
-
-# Project library imports
+from library.e_series import (
+    E12,
+    E24,
+    E48,
+    e_series_in_range,
+    e_series_ratio,
+)
+from library.jlcpcb.part_picker import pick_part
+from library.jlcpcb.util import float_to_si
 from library.library.components import (
-    TPS54331DR,
-    Capacitor,
-    Resistor,
-    Diode,
-    Inductor,
-    Mounting_Hole,
-    Faebryk_Logo,
-    Pin_Header,
     MOSFET,
     TL072CDT,
+    TPS54331DR,
+    Faebryk_Logo,
+    Inductor,
+    Mounting_Hole,
+    Pin_Header,
+)
+from faebryk.core.util import (
+    as_unit,
+    as_unit_with_tolerance,
 )
 
-from library.jlcpcb.part_picker import pick_part
-
-from library.e_series import e_series_ratio, e_series_in_range, E12, E24, E48
-from library.jlcpcb.util import float_to_si
-
-from math import sqrt, pi, log10, tan, atan, degrees, radians, exp
+log = logging.getLogger(__name__)
 
 
 class Boost_Converter_TPS61040DBVR(Module):
@@ -319,8 +326,8 @@ class Automatic_Sensing_Resistor_Switching(Module):
                 self.NODEs.sensing_resistors,
             )
         ):
-            self.IFs.power_input.NODEs.hv.connect(nmos.IFs.drain)
-            nmos.IFs.source.connect_via(rs, self.IFs.power_output.NODEs.hv)
+            self.IFs.power_input.IFs.hv.connect(nmos.IFs.drain)
+            nmos.IFs.source.connect_via(rs, self.IFs.power_output.IFs.hv)
             dual_amp_i = math.floor(i / 2)
             amp_i = i % 2
             nmos.IFs.source.connect(
@@ -328,7 +335,7 @@ class Automatic_Sensing_Resistor_Switching(Module):
                     dual_amp_i
                 ].IFs.non_inverting_inputs[amp_i]
             )
-            self.IFs.power_output.NODEs.hv.connect(
+            self.IFs.power_output.IFs.hv.connect(
                 self.NODEs.dual_instrumentation_amplifiers[
                     dual_amp_i
                 ].IFs.inverting_inputs[amp_i]
@@ -352,13 +359,13 @@ class Automatic_Sensing_Resistor_Switching(Module):
         for i, output in enumerate(self.IFs.adc_output):
             output.connect_via(
                 self.NODEs.output_voltage_limiting_diodes[2 * i],
-                self.IFs.power_input_adc.NODEs.hv,
+                self.IFs.power_input_adc.IFs.hv,
             )
-            self.IFs.power_input_adc.NODEs.lv.connect_via(
+            self.IFs.power_input_adc.IFs.lv.connect_via(
                 self.NODEs.output_voltage_limiting_diodes[2 * i + 1], output
             )
 
-        self.IFs.power_input.NODEs.lv.connect(self.IFs.power_output.NODEs.lv)
+        self.IFs.power_input.IFs.lv.connect(self.IFs.power_output.IFs.lv)
 
         # set partnumbers for voltage limiting diodes
         for diode in self.NODEs.output_voltage_limiting_diodes:
@@ -678,44 +685,63 @@ class Buck_Converter_TPS54331DR(Module):
         )
 
     def check_input_output_voltage_range(
-        self, input_voltage: Range, output_voltage: Constant, output_current: Constant
+        self,
+        input_voltage: Parameter,
+        output_voltage: Parameter,
+        output_current: Parameter,
     ):
         # catch diode D1 forward voltage
-        V_D = 0.55
+        V_D = Constant(0.55)
         # output inductor series resistance
-        R_L = 0.3
-        # minimum output current
-        I_o_min = 0
-        #
-        R_ds_on_min = 80e-3
-        R_ds_on_max = 200e-3
-        V_o_min = (
-            0.089 * ((input_voltage.max - I_o_min * R_ds_on_min) + V_D)
-            - (I_o_min * R_L)
-            - V_D
+        R_L = Constant(0.3)
+        # Drain to source on resistance of internal MOSFET
+        R_ds_on = Range(80e-3, 200e-3)
+
+        if type(input_voltage) is Range:
+            V_i = input_voltage
+        elif type(input_voltage) is Constant:
+            V_i = Range(input_voltage, input_voltage)
+
+        if type(output_current) is Range:
+            I_o = output_current
+        elif type(output_current) is Constant:
+            I_o = Range(output_current, output_current)
+
+        if type(output_voltage) is Range:
+            V_o = output_voltage
+        elif type(output_voltage) is Constant:
+            V_o = Range(output_voltage, output_voltage)
+
+        V_o_costraint = Range(
+            Constant(0.089) * (Constant(V_i.min - I_o.min * R_ds_on.min) + V_D)
+            - (I_o.min * R_L)
+            - V_D,
+            Constant(0.91) * (Constant(input_voltage.min - I_o.max * R_ds_on.max) + V_D)
+            - (I_o.max * R_L)
+            - V_D,
         )
-        if output_voltage.value < V_o_min:
+
+        if V_o_costraint.min > V_o.min:
             raise ValueError(
-                f"Output voltage of {float_to_si(output_voltage.value)}V is lower than minimum output voltage of {float_to_si(V_o_min)}V"
+                f"Output voltage of {as_unit_with_tolerance(output_voltage, 'V')} "
+                "is lower than minimum output voltage of "
+                f"{as_unit_with_tolerance(V_o, 'V')}"
             )
-        V_o_max = (
-            0.91 * ((input_voltage.min - output_current.value * R_ds_on_max) + V_D)
-            - (output_current.value * R_L)
-            - V_D
-        )
-        if output_voltage.value > V_o_max:
+        if V_o_costraint.max < V_o.max:
             raise ValueError(
-                f"Output voltage of {float_to_si(output_voltage.value)}V is higher than maximum output voltage of {float_to_si(V_o_max)}V"
+                f"Output voltage of {as_unit_with_tolerance(output_voltage,'V')} "
+                " is higher than maximum output voltage of "
+                f"{as_unit_with_tolerance(V_o, 'V')}"
             )
 
     def calc_component_values(
         self,
-        input_voltage: Range,
-        output_voltage: Constant,
-        input_ripple_voltage: Constant = Constant(0.25),
-        output_ripple_voltage: Constant = Constant(0.05),
-        output_current: Constant = Constant(0.5),
-        output_voltage_accuracy: Constant = Constant(0.02),
+        input_voltage: Parameter,
+        output_voltage: Parameter,
+        input_ripple_voltage: Parameter,
+        output_ripple_voltage: Parameter,
+        output_current: Parameter,
+        output_voltage_accuracy: Parameter,
     ):
         self.check_input_output_voltage_range(
             input_voltage, output_voltage, output_current
@@ -743,11 +769,20 @@ class Buck_Converter_TPS54331DR(Module):
     ) -> None:
         super().__init__()
 
-        # Switching frequency is fixed at 570kHz
-        self.switching_frequency = 570e3
+        class PARAMS(super().PARAMS()):
+            # Switching frequency is fixed at 570kHz
+            switching_frequency = Constant(570e3)
+            # reference voltage is at 800mV
+            reference_voltage = Constant(800e-3)
 
-        # reference voltage is at 800mV
-        self.reference_voltage = 800e-3
+            input_voltage = TBD()
+            output_voltage = TBD()
+            input_ripple_voltage = Constant(0.25)
+            output_ripple_voltage = Constant(0.05)
+            output_current = Constant(0.5)
+            output_voltage_accuracy = Constant(0.02)
+
+        self.PARAMs = PARAMS(self)
 
         class _IFs(super().IFS()):
             input = ElectricPower()
@@ -758,76 +793,101 @@ class Buck_Converter_TPS54331DR(Module):
         class _NODEs(Module.NODES()):
             U1 = TPS54331DR()
             # divider for UVLO mechanism in enable pin
-            R1 = Resistor(TBD, tolerance=Range(0, 1))
-            R2 = Resistor(TBD, tolerance=Range(0, 1))
+            R1 = Resistor()
+            R2 = Resistor()
             # compensation resistor
-            R3 = Resistor(TBD, tolerance=Range(0, 1))
+            R3 = Resistor()
             # R4 is omitted, not necessary in most designs
             # Divider for Vsense
-            R5 = Resistor(TBD, tolerance=Range(0, 1))
-            R6 = Resistor(TBD, tolerance=Range(0, 1))
+            R5 = Resistor()
+            R6 = Resistor()
             # input bulk caps
-            C1 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 20),
-                rated_voltage=Constant(10),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
+            C1 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(10)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(
+                            Capacitor.TemperatureCoefficient.X5R,
+                        )
+                    ),
+                )
             )
-            C2 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 20),
-                rated_voltage=Constant(10),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
+            C2 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(10)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(
+                            Capacitor.TemperatureCoefficient.X5R,
+                        )
+                    ),
+                )
             )
             # input HF filter cap of 10nF
-            C3 = Capacitor(
-                capacitance=Constant(10e-9),
-                tolerance=Range(0, 20),
-                rated_voltage=Constant(50),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            C3 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.capacitance.merge(Range.from_center(10e-9, 2e-9)),
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(50)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X7R)
+                    ),
+                )
             )
             # boot capacitor, always 100nF
-            C4 = Capacitor(
-                capacitance=Constant(100e-9),
-                tolerance=Range(0, 10),
-                rated_voltage=Constant(25),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            C4 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.capacitance.merge(Range.from_center(100e-9, 10e-9)),
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(25)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X7R)
+                    ),
+                )
             )
             # slow-start capacitor, abs. max voltage on SS pin is 3V
-            C5 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 10),
-                rated_voltage=Constant(25),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            C5 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.capacitance.merge(TBD()),
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(25)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X7R)
+                    ),
+                )
             )
             # Compensation capacitors, abs. max voltage on comp pin is 3V
-            C6 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 10),
-                rated_voltage=Constant(16),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            C6 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(16)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X7R)
+                    ),
+                )
             )
-            C7 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 10),
-                rated_voltage=Constant(25),
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X7R),
+            C7 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.rated_voltage.merge(Range.lower_bound(25)),
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X7R)
+                    ),
+                )
             )
             # output capacitors
-            C8 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 20),
-                rated_voltage=TBD,
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
+            C8 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X5R)
+                    ),
+                )
             )
-            C9 = Capacitor(
-                capacitance=TBD,
-                tolerance=Range(0, 20),
-                rated_voltage=TBD,
-                temperature_coefficient=Constant(Capacitor.TemperatureCoefficient.X5R),
+            C9 = Capacitor().builder(
+                lambda c: (
+                    c.PARAMs.temperature_coefficient.merge(
+                        Range.lower_bound(Capacitor.TemperatureCoefficient.X5R)
+                    ),
+                )
             )
             # Catch diode
-            D1 = Diode(partnumber=Constant("B340A-13-F"))
+            # TODO: partnumber=Constant("B340A-13-F"))
+            D1 = Diode()
+
             # Inductor
             L1 = Inductor(
                 inductance=TBD,
@@ -839,6 +899,7 @@ class Buck_Converter_TPS54331DR(Module):
 
         self.NODEs = _NODEs(self)
 
+        # TODO: check if this is necessary, is it for LCSC footprint compatibility?
         self.NODEs.D1.add_trait(
             can_attach_to_footprint_via_pinmap(
                 {
@@ -849,16 +910,16 @@ class Buck_Converter_TPS54331DR(Module):
         )
 
         # connect power and grounds
-        gnd = self.IFs.input.NODEs.lv
-        gnd.connect(self.IFs.output.NODEs.lv)
+        gnd = self.IFs.input.IFs.lv
+        gnd.connect(self.IFs.output.IFs.lv)
         self.IFs.input.connect(self.NODEs.U1.IFs.Vin)
 
         # input bulk and filter caps
         for cap in [self.NODEs.C1, self.NODEs.C2, self.NODEs.C3]:
-            self.IFs.input.NODEs.hv.connect_via(cap, gnd)
+            self.IFs.input.IFs.hv.connect_via(cap, gnd)
 
         # enable UVLO divider
-        self.IFs.input.NODEs.hv.connect_via(self.NODEs.R1, self.NODEs.U1.IFs.enable)
+        self.IFs.input.IFs.hv.connect_via(self.NODEs.R1, self.NODEs.U1.IFs.enable)
         self.NODEs.U1.IFs.enable.connect_via(self.NODEs.R2, gnd)
 
         # slow-start cap
@@ -879,14 +940,14 @@ class Buck_Converter_TPS54331DR(Module):
         self.NODEs.R3.IFs.unnamed[1].connect(gnd)
 
         # inductor
-        self.NODEs.U1.IFs.PH.connect_via(self.NODEs.L1, self.IFs.output.NODEs.hv)
+        self.NODEs.U1.IFs.PH.connect_via(self.NODEs.L1, self.IFs.output.IFs.hv)
 
         # output caps
-        self.IFs.output.NODEs.hv.connect_via(self.NODEs.C8, gnd)
-        self.IFs.output.NODEs.hv.connect_via(self.NODEs.C9, gnd)
+        self.IFs.output.IFs.hv.connect_via(self.NODEs.C8, gnd)
+        self.IFs.output.IFs.hv.connect_via(self.NODEs.C9, gnd)
 
         # vsense divider
-        self.IFs.output.NODEs.hv.connect_via(self.NODEs.R5, self.NODEs.U1.IFs.Vsense)
+        self.IFs.output.IFs.hv.connect_via(self.NODEs.R5, self.NODEs.U1.IFs.Vsense)
         self.NODEs.U1.IFs.Vsense.connect_via(self.NODEs.R6, gnd)
 
         self.calc_component_values(
@@ -951,6 +1012,15 @@ class PPK_PD(Module):
                 output_ripple_voltage=Constant(0.001),
                 input_ripple_voltage=Constant(0.1),
             )
+            buck = Buck_Converter_TPS54331DR().builder(
+                lambda b: (
+                    b.PARAMs.input_voltage.merge(Range(5, 22)),
+                    b.PARAMs.output_voltage.merge(Range.from_center(4, 0.01)),
+                    b.PARAMs.output_current.merge(Range.lower_bound(0.5)),
+                    b.PARAMs.output_ripple_voltage.merge(Range.upper_bound(0.001)),
+                    b.PARAMs.input_ripple_voltage.merge(Range.upper_bound(0.1)),
+                )
+            )
             mounting_hole = times(4, Mounting_Hole)
             faebryk_logo = Faebryk_Logo()
             input_header = Pin_Header(1, 2, 2.54)
@@ -964,17 +1034,13 @@ class PPK_PD(Module):
 
         self.NODEs = _NODEs(self)
 
-        self.NODEs.input_header.IFs.unnamed[0].connect(
-            self.NODEs.buck.IFs.input.NODEs.lv
-        )
-        self.NODEs.input_header.IFs.unnamed[1].connect(
-            self.NODEs.buck.IFs.input.NODEs.hv
-        )
+        self.NODEs.input_header.IFs.unnamed[0].connect(self.NODEs.buck.IFs.input.IFs.lv)
+        self.NODEs.input_header.IFs.unnamed[1].connect(self.NODEs.buck.IFs.input.IFs.hv)
         self.NODEs.output_header.IFs.unnamed[0].connect(
-            self.NODEs.buck.IFs.output.NODEs.lv
+            self.NODEs.buck.IFs.output.IFs.lv
         )
         self.NODEs.output_header.IFs.unnamed[1].connect(
-            self.NODEs.buck.IFs.output.NODEs.hv
+            self.NODEs.buck.IFs.output.IFs.hv
         )
 
         # # list sense resistors and their minimum and maximum currents, and case size

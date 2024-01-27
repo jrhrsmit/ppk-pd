@@ -1,32 +1,28 @@
-import logging
-from typing import Tuple, Callable, Any
 import json
-import subprocess
-from pathlib import Path
-import time
-
-import sqlite3
+import logging
 import os
 import re
-from si_prefix import SI_PREFIX_UNITS, si_format, si_parse
-from math import log10, ceil, floor
-from library.e_series import E24, E48, E96, E192
+import sqlite3
+import subprocess
+import time
+from math import ceil, floor, log10
+from pathlib import Path
+from typing import Any, Callable, Tuple, TypedDict
 
+import wget
+from faebryk.core.core import Footprint, Module, Parameter
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
 from faebryk.library.TBD import TBD
-from faebryk.core.core import Module, Parameter, Footprint
-import wget
-
-from typing import TypedDict
+from faebryk.library.Resistor import Resistor
+from library.e_series import E24, E48, E96, E192
+from si_prefix import SI_PREFIX_UNITS, si_format, si_parse
 
 # import asyncio
 from tortoise import Tortoise
-from tortoise.models import Model
-from tortoise.fields import JSONField, IntField, CharField
 from tortoise.expressions import Q
-
-from library.components import Resistor
+from tortoise.fields import CharField, IntField, JSONField
+from tortoise.models import Model
 
 logger = logging.getLogger(__name__)
 

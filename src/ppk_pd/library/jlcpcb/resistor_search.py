@@ -1,16 +1,16 @@
+import json
 import logging
 
-from library.library.components import Resistor
-from library.jlcpcb.util import (
-    float_to_si,
-    si_to_float,
-    jlcpcb_db,
-)
-from library.e_series import e_series_in_range
 from faebryk.core.core import Parameter
-import json
 from faebryk.library.Constant import Constant
 from faebryk.library.Range import Range
+from faebryk.library.Resistor import Resistor
+from library.e_series import e_series_in_range
+from library.jlcpcb.util import (
+    float_to_si,
+    jlcpcb_db,
+    si_to_float,
+)
 
 logger = logging.getLogger(__name__)
 

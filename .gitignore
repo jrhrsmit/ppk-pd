@@ -110,3 +110,5 @@ _local
 cache.z0*
 cache.zip
 cache.sqlite3
+
+poetry.lock
